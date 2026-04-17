@@ -237,6 +237,14 @@ async def webhook(request: Request):
         has_number = bool(re.search(r'\d', text))
         is_command = text.startswith("/")
 
+        # Extract dynamic DB Context for conversational AI routing
+        if supabase:
+            try:
+                txs = supabase.table("transactions").select("amount, type, category, note").order("created_at", desc=True).limit(30).execute().data
+                pending["recent_database_memory"] = txs
+            except Exception as e:
+                print("DEBUG: DB Context fetch failed", e)
+
         # AI Processing
         ai_res = ask_ai(text, pending, photo_url)
         print("DEBUG AI RAW:", ai_res)
