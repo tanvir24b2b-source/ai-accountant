@@ -110,6 +110,40 @@ async def webhook(request: Request):
 
     if not chat_id: return {"ok": True}
 
+    # Onboarding Trigger Phase (Priority 1)
+    trigger_words = ["you are hired", "start", "setup", "manage my finance"]
+    text_lower = text.lower()
+    if any(tw in text_lower for tw in trigger_words):
+        conversations[chat_id] = {"onboarding_mode": True, "step": 1}
+        send_message(chat_id, "Thanks. I’ll manage finance for De Markt.\n\nFirst, tell me:\ncurrent cash in hand and bank balance?")
+        return {"ok": True}
+        
+    pending = conversations.get(chat_id, {})
+    if pending.get("onboarding_mode"):
+        step = pending.get("step", 1)
+        if step == 1:
+            try:
+                ai_res = ask_ai(text, {"type":"balance"})
+                parsed = json.loads(ai_res)
+                if supabase and parsed.get("amount"):
+                    supabase.table("transactions").insert({"type": "balance", "category": parsed.get("category", "cash_balance"), "amount": parsed.get("amount"), "source": "telegram"}).execute()
+            except: pass
+            conversations[chat_id]["step"] = 2
+            send_message(chat_id, "Got it. Any current vendor dues or unpaid bills?")
+            return {"ok": True}
+        elif step == 2:
+            conversations[chat_id]["step"] = 3
+            send_message(chat_id, "Understood. Who are the active employees and their monthly salaries?")
+            return {"ok": True}
+        elif step == 3:
+            conversations[chat_id]["step"] = 4
+            send_message(chat_id, "Noted. What are the regular monthly bills and ad platforms?")
+            return {"ok": True}
+        else:
+            del conversations[chat_id]
+            send_message(chat_id, "Setup complete! I am now in active finance manager mode. You can log all transactions normally.")
+            return {"ok": True}
+
     # Document check for Excel processing
     document = msg.get("document", {})
     if document.get("file_name", "").endswith(".xlsx"):
@@ -243,6 +277,12 @@ async def webhook(request: Request):
     conversations[chat_id] = parsed
 
     if not parsed.get("is_complete") and len(lines) == 1:
+        has_number = bool(re.findall(r'\d+(?:\.\d+)?', line))
+        if not has_number and not photo_url:
+            send_message(chat_id, "I noted that context. Please specify an actual financial amount if you intend to log a transaction.")
+            if chat_id in conversations: del conversations[chat_id]
+            return {"ok": True}
+            
         if not parsed.get("amount"): send_message(chat_id, "What represents the amount?")
         elif not parsed.get("type"): send_message(chat_id, "Is this tagged as an Expense, Income, or Liability constraint?")
         elif not parsed.get("category"): send_message(chat_id, "Which specific business category?")
