@@ -138,67 +138,90 @@ async def webhook(request: Request):
         send_message(chat_id, reply)
         return {"ok": True}
 
-    ai_response = ask_ai(text)
-    print("RAW AI:", ai_response)
-
-    try:
-        parsed = json.loads(ai_response.strip())
-        print("PARSED:", parsed)
-    except:
-        reply = f"AI raw: {ai_response}"
-        send_message(chat_id, reply)
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    if not lines:
         return {"ok": True}
 
-    try:
-        amount = parsed.get("amount", 0)
-        type_ = parsed.get("type", "")
-        category = parsed.get("category", "")
+    saved_count = 0
+    results = []
 
-        # Fallback logic for amount
-        numbers_in_text = re.findall(r'\d+(?:\.\d+)?', text)
-        if (not amount or amount == 0) and numbers_in_text:
-            amount = float(numbers_in_text[0])
+    for line in lines:
+        ai_response = ask_ai(line)
+        print(f"RAW AI ({line}):", ai_response)
 
-        # Fallback logic for classification
-        if not type_ or not category:
-            text_lower = text.lower()
-            if "rent" in text_lower:
-                type_ = "expense"
-                category = "rent"
-            elif "salary" in text_lower:
-                type_ = "expense"
-                category = "salary"
-            elif "transport" in text_lower:
-                type_ = "expense"
-                category = "transport"
-            elif "laptop" in text_lower:
-                type_ = "expense"
-                category = "equipment"
-            elif "borrowed" in text_lower:
-                type_ = "liability"
-                category = "loan"
-            elif "supplier due" in text_lower:
-                type_ = "liability"
-                category = "supplier_due"
-            elif "sales" in text_lower:
-                type_ = "income"
-                category = "sales"
+        try:
+            parsed = json.loads(ai_response.strip())
+            print(f"PARSED ({line}):", parsed)
+        except Exception as e:
+            print(f"Parsing error for line '{line}':", e)
+            if len(lines) == 1:
+                send_message(chat_id, f"AI raw: {ai_response}")
+                return {"ok": True}
+            continue
 
-        if supabase:
-            supabase.table("transactions").insert({
-                "amount": amount,
-                "type": type_,
-                "category": category,
-                "note": text,
-                "source": "telegram"
-            }).execute()
+        try:
+            amount = parsed.get("amount", 0)
+            type_ = parsed.get("type", "")
+            category = parsed.get("category", "")
 
-        reply = f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}\nNote: {text}"
+            # Fallback logic for amount
+            numbers_in_text = re.findall(r'\d+(?:\.\d+)?', line)
+            if (not amount or amount == 0) and numbers_in_text:
+                amount = float(numbers_in_text[0])
 
-    except Exception as e:
-        print("ERROR:", str(e))
-        reply = "Database saving error."
+            # Fallback logic for classification
+            if not type_ or not category:
+                text_lower = line.lower()
+                if "rent" in text_lower:
+                    type_ = "expense"
+                    category = "rent"
+                elif "salary" in text_lower:
+                    type_ = "expense"
+                    category = "salary"
+                elif "transport" in text_lower:
+                    type_ = "expense"
+                    category = "transport"
+                elif "laptop" in text_lower:
+                    type_ = "expense"
+                    category = "equipment"
+                elif "borrowed" in text_lower:
+                    type_ = "liability"
+                    category = "loan"
+                elif "supplier due" in text_lower:
+                    type_ = "liability"
+                    category = "supplier_due"
+                elif "sales" in text_lower:
+                    type_ = "income"
+                    category = "sales"
 
-    send_message(chat_id, reply)
+            if supabase:
+                supabase.table("transactions").insert({
+                    "amount": amount,
+                    "type": type_,
+                    "category": category,
+                    "note": line,
+                    "source": "telegram"
+                }).execute()
+
+            saved_count += 1
+            if len(lines) == 1:
+                send_message(chat_id, f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}\nNote: {line}")
+                return {"ok": True}
+            else:
+                results.append(f"{saved_count}.\nAmount: {amount}\nType: {type_}\nCategory: {category}")
+
+        except Exception as e:
+            print(f"ERROR processing line '{line}':", str(e))
+            if len(lines) == 1:
+                send_message(chat_id, "Database saving error.")
+                return {"ok": True}
+            continue
+
+    if len(lines) > 1:
+        if saved_count > 0:
+            reply = f"Saved {saved_count} transactions:\n\n" + "\n\n".join(results)
+            send_message(chat_id, reply)
+        else:
+            send_message(chat_id, "Error: No transactions could be saved.")
 
     return {"ok": True}
