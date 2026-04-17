@@ -34,8 +34,8 @@ def send_message(chat_id, text):
     resp = requests.post(url, json=payload)
     print("Telegram send:", resp.status_code)
 
-def ask_ai(text: str, pending_context: dict = None) -> str:
-    system_prompt = """You are an AI accountant for "De Markt", an ecommerce gadget brand in BDT.
+def ask_ai(text: str, pending_context: dict = None, photo_url: str = None) -> str:
+    system_prompt = """You are an AI chartered accountant for "De Markt", an ecommerce gadget brand in BDT.
     
 Schema:
 {
@@ -46,6 +46,7 @@ Schema:
   "due": number or null,
   "employee_role": string or null,
   "ad_platform": string or null,
+  "ca_note": string (optional, 1-2 sentence professional chartered accountant observation. Short, proactive guidance.),
   "is_complete": boolean (true ONLY if amount, type, and category are ALL firmly defined and valid string types. If any of the three are ambiguous or missing, false)
 }
 
@@ -56,23 +57,32 @@ Allowed Categories:
 - Owner: founder_withdrawal, founder_investment
 
 Rules:
-1. You may receive partial statements (e.g. "sales"). Merge them with the Pending Context organically. 
+1. You may receive partial statements or invoice photos. Merge them with the Pending Context organically. 
 2. If `amount`, `type`, and `category` are decisively established correctly, set `is_complete: true`. Otherwise `is_complete: false`.
 3. If partial payment, calculate due.
 4. Ad loading: $ -> BDT if rate given.
-5. Do NOT add extra text. ONLY return valid JSON."""
+5. Provide a very brief CA note (e.g. "Vendor payable increased today. We should plan a payment.") if relevant.
+6. Do NOT add extra text. ONLY return valid JSON."""
 
-    context_str = f"\n\nPending Context to Merge: {json.dumps(pending_context)}" if pending_context else ""
+    context_str = f"\n\nPending Context: {json.dumps(pending_context)}" if pending_context else ""
     
+    user_content = []
+    if text:
+        user_content.append({"type": "text", "text": text})
+    if photo_url:
+        user_content.append({"type": "image_url", "image_url": {"url": photo_url}})
+    
+    if not user_content: return "{}"
+
     try:
         res = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
             json={
-                "model": "mistralai/mistral-7b-instruct",
+                "model": "openai/gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": system_prompt + context_str},
-                    {"role": "user", "content": text}
+                    {"role": "user", "content": user_content}
                 ]
             }
         )
@@ -106,9 +116,17 @@ async def webhook(request: Request):
 
     msg = update.get("message", {})
     chat_id = msg.get("chat", {}).get("id")
-    text = msg.get("text", "").strip()
+    text = msg.get("text", msg.get("caption", "")).strip()
 
-    if not chat_id or not text:
+    photo_url = None
+    if "photo" in msg:
+        file_id = msg["photo"][-1]["file_id"]
+        f_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}").json()
+        if f_res.get("ok"):
+            file_path = f_res["result"]["file_path"]
+            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+
+    if not chat_id or (not text and not photo_url):
         return {"ok": True}
 
     if chat_id not in user_settings:
@@ -172,10 +190,12 @@ async def webhook(request: Request):
 
     # Batch Check
     lines = [line.strip() for line in text.split('\n') if line.strip() and not line.startswith("/")]
-    if not lines:
+    if not lines and photo_url:
+        lines = ["Process this invoice matching De Markt logic."]
+    elif not lines:
         return {"ok": True}
 
-    if len(lines) > 1:
+    if len(lines) > 1 and not photo_url:
         saved_count = 0
         results = []
         for line in lines:
@@ -203,10 +223,10 @@ async def webhook(request: Request):
             send_message(chat_id, f"Saved {saved_count} transactions:\n\n" + "\n\n".join(results))
         return {"ok": True}
 
-    # Conversational Phase (Single Line)
+    # Conversational Phase (Single Line or Photo)
     line = lines[0]
     pending = conversations.get(chat_id, {})
-    ai_res = ask_ai(line, pending)
+    ai_res = ask_ai(line, pending, photo_url)
     
     try:
         parsed = json.loads(ai_res)
@@ -252,6 +272,9 @@ async def webhook(request: Request):
 
     reply_str = f"Saved\nAmount: {fmt(amount)}\nType: {parsed.get('type')}\nCategory: {parsed.get('category')}\nNote: {line}"
     if extras: reply_str += "\n" + "\n".join(extras)
+    
+    if parsed.get("ca_note"):
+        reply_str += f"\n\nCA Note:\n{parsed.get('ca_note')}"
 
     send_message(chat_id, reply_str)
     return {"ok": True}
