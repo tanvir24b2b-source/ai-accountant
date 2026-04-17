@@ -144,6 +144,30 @@ async def webhook(request: Request):
         send_message(chat_id, reply)
         return {"ok": True}
 
+    if text.strip().lower() == "/today":
+        if not supabase:
+            send_message(chat_id, "Database not configured.")
+            return {"ok": True}
+        
+        try:
+            from datetime import datetime, timezone
+            today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            res = supabase.table("transactions").select("*").gte("created_at", today_date).execute()
+            transactions = res.data
+            
+            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+            balance = income - expense
+            
+            reply = f"Today\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(balance)}"
+        except Exception as e:
+            print("TODAY ERROR:", str(e))
+            reply = "Could not generate today's summary."
+            
+        send_message(chat_id, reply)
+        return {"ok": True}
+
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     if not lines:
         return {"ok": True}
