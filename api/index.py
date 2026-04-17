@@ -246,8 +246,15 @@ async def webhook(request: Request):
                 print("DEBUG: DB Context fetch failed", e)
 
         # AI Processing
+        print(f"DEBUG USER: {text}")
         ai_res = ask_ai(text, pending, photo_url)
-        print("DEBUG AI RAW:", ai_res)
+        print(f"DEBUG AI RAW: {ai_res}")
+
+        if not ai_res or str(ai_res).strip() in ["{}", "[]", "None", "null"]:
+            final_reply = "Sorry, I didn’t understand. Can you rephrase?"
+            print(f"DEBUG FINAL REPLY: {final_reply}")
+            send_message(chat_id, final_reply)
+            return {"ok": True}
 
         # Retain history window natively 
         pending["history"].append({"role": "user", "content": text})
@@ -257,12 +264,13 @@ async def webhook(request: Request):
 
         try:
             parsed = json.loads(ai_res)
-            print("DEBUG PARSED JSON:", parsed)
+            print(f"DEBUG PARSED JSON: {parsed}")
         except Exception as json_err:
-            print("DEBUG JSON FAILED:", json_err)
+            print(f"DEBUG JSON FAILED: {json_err}")
             # If response is not JSON, it is a conversational CA-style reply natively
             final_reply = str(ai_res).strip()
-            if not final_reply: final_reply = "Sorry, I hit a setup issue. Please send that again."
+            if not final_reply or final_reply in ["{}", "[]"]: final_reply = "Something went wrong. Please try again."
+            print(f"DEBUG FINAL REPLY: {final_reply}")
             send_message(chat_id, final_reply)
             return {"ok": True}
 
@@ -272,7 +280,8 @@ async def webhook(request: Request):
                 print("DEBUG: Safety block activated. Passing JSON structurally as text due to zero digits.")
                 # Extrapolate conversational content cleanly 
                 final_reply = str(parsed.get("ca_reply", parsed.get("message", ai_res))).strip()
-                if not final_reply: final_reply = "Sorry, I hit a setup issue. Please send that again."
+                if not final_reply or final_reply == "{}": final_reply = "Something went wrong. Please try again."
+                print(f"DEBUG FINAL REPLY: {final_reply}")
                 send_message(chat_id, final_reply)
                 return {"ok": True}
             
@@ -295,17 +304,19 @@ async def webhook(request: Request):
                 reply_lines.append(f"- {category}: {amount} ({t_type})")
                 
             final_reply = "\n".join(reply_lines)
-            if not final_reply.strip(): final_reply = "Sorry, I hit a setup issue. Please send that again."
+            if not final_reply.strip(): final_reply = "Something went wrong. Please try again."
+            print(f"DEBUG FINAL REPLY: {final_reply}")
             send_message(chat_id, final_reply)
             return {"ok": True}
 
         # If the JSON doesn't contain a transactions list (maybe valid JSON hallucination format), pass it natively.
         final_reply = str(parsed.get("ca_reply", parsed.get("message", parsed.get("transactions", ai_res)))).strip()
-        if not final_reply or final_reply == 'None': final_reply = "Sorry, I hit a setup issue. Please send that again."
+        if not final_reply or final_reply in ["None", "{}", "[]"]: final_reply = "Something went wrong. Please try again."
+        print(f"DEBUG FINAL REPLY: {final_reply}")
         send_message(chat_id, final_reply)
         return {"ok": True}
 
     except Exception as master_err:
         print(f"DEBUG CRITICAL APP FAILURE: {str(master_err)}")
-        send_message(chat_id, "Sorry, I hit a setup issue. Please send that again.")
+        send_message(chat_id, "System error. Please send again.")
         return {"ok": True}
