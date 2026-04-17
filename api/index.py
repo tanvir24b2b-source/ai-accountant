@@ -122,77 +122,58 @@ async def webhook(request: Request):
     if not chat_id or not text:
         return {"ok": True}
 
-    if text.strip().lower() == "/summary":
-        if not supabase:
-            send_message(chat_id, "Database not configured.")
-            return {"ok": True}
-        
-        try:
-            res = supabase.table("transactions").select("*").execute()
-            transactions = res.data
-            
-            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
-            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
-            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
-            balance = income - expense
-            
-            reply = f"Summary\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(balance)}"
-        except Exception as e:
-            print("SUMMARY ERROR:", str(e))
-            reply = "Could not generate summary."
-            
-        send_message(chat_id, reply)
-        return {"ok": True}
+    text_stripped = text.strip()
 
-    if text.strip().lower() == "/today":
+    if text_stripped.startswith("/"):
         if not supabase:
             send_message(chat_id, "Database not configured.")
             return {"ok": True}
-        
-        try:
-            from datetime import datetime, timezone
-            today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            res = supabase.table("transactions").select("*").gte("created_at", today_date).execute()
-            transactions = res.data
-            
-            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
-            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
-            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
-            balance = income - expense
-            
-            reply = f"Today\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(balance)}"
-        except Exception as e:
-            print("TODAY ERROR:", str(e))
-            reply = "Could not generate today's summary."
-            
-        send_message(chat_id, reply)
-        return {"ok": True}
 
-    if text.strip().lower() == "/monthly":
-        if not supabase:
-            send_message(chat_id, "Database not configured.")
-            return {"ok": True}
-        
+        commands = [c.strip().lower() for c in text_stripped.split(',')]
+        responses = []
+
         try:
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
-            month_start = f"{now.year}-{now.month:02d}-01"
-            res = supabase.table("transactions").select("*").gte("created_at", month_start).execute()
-            transactions = res.data
             
-            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
-            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
-            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
-            profit_loss = income - expense
-            
-            reply = f"Monthly Report\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nProfit/Loss: {fmt(profit_loss)}"
+            for cmd in commands:
+                if cmd == "/summary":
+                    res = supabase.table("transactions").select("*").execute()
+                    transactions = res.data
+                    income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+                    expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+                    liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+                    balance = income - expense
+                    responses.append(f"Summary\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(balance)}")
+                
+                elif cmd == "/today":
+                    today_date = now.strftime("%Y-%m-%d")
+                    res = supabase.table("transactions").select("*").gte("created_at", today_date).execute()
+                    transactions = res.data
+                    income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+                    expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+                    liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+                    balance = income - expense
+                    responses.append(f"Today\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(balance)}")
+                
+                elif cmd == "/monthly":
+                    month_start = f"{now.year}-{now.month:02d}-01"
+                    res = supabase.table("transactions").select("*").gte("created_at", month_start).execute()
+                    transactions = res.data
+                    income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+                    expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+                    liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+                    profit_loss = income - expense
+                    responses.append(f"Monthly Report\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nProfit/Loss: {fmt(profit_loss)}")
+                
         except Exception as e:
-            print("MONTHLY ERROR:", str(e))
-            reply = "Could not generate monthly report."
+            print("COMMAND ERROR:", str(e))
+            responses.append("Could not generate report.")
             
-        send_message(chat_id, reply)
+        send_message(chat_id, "\n\n".join(responses) if responses else "Unknown command.")
         return {"ok": True}
 
+    # Transaction parsing lines
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     if not lines:
         return {"ok": True}
@@ -201,6 +182,9 @@ async def webhook(request: Request):
     results = []
 
     for line in lines:
+        if line.startswith("/"):
+            continue # Extra safeguard just in case mixed block is passed
+
         ai_response = ask_ai(line)
         print(f"RAW AI ({line}):", ai_response)
 
