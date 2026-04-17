@@ -129,7 +129,8 @@ async def webhook(request: Request):
             send_message(chat_id, "Database not configured.")
             return {"ok": True}
 
-        commands = [c.strip().lower() for c in text_stripped.split(',')]
+        # Handle both comma and newline delimited commands
+        commands = [c.strip().lower() for c in re.split(r'[,\n]+', text_stripped) if c.strip()]
         responses = []
 
         try:
