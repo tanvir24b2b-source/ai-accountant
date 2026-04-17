@@ -116,6 +116,28 @@ async def webhook(request: Request):
     if not chat_id or not text:
         return {"ok": True}
 
+    if text.strip().lower() == "/summary":
+        if not supabase:
+            send_message(chat_id, "Database not configured.")
+            return {"ok": True}
+        
+        try:
+            res = supabase.table("transactions").select("*").execute()
+            transactions = res.data
+            
+            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+            balance = income - expense
+            
+            reply = f"Summary\nIncome: {income}\nExpense: {expense}\nLiability: {liability}\nBalance: {balance}"
+        except Exception as e:
+            print("SUMMARY ERROR:", str(e))
+            reply = "Could not generate summary."
+            
+        send_message(chat_id, reply)
+        return {"ok": True}
+
     ai_response = ask_ai(text)
     print("RAW AI:", ai_response)
 
