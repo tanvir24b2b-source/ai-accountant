@@ -32,51 +32,33 @@ def send_message(chat_id, text):
     print("Telegram response:", resp.text)
 
 def ask_ai(text: str) -> str:
-    system_prompt = """You are an accounting data extractor.
-Return ONLY valid JSON.
-No markdown.
-No explanation.
-No extra text.
+    system_prompt = """You are an AI accountant for "De Markt", an ecommerce gadget brand in BDT.
+Return ONLY valid JSON. No markdown. No explanations.
 
 Schema:
 {
   "amount": number,
-  "type": "income" | "expense" | "liability",
-  "category": string
+  "type": "income" | "expense" | "liability" | "owner",
+  "category": string,
+  "vendor_name": string (optional),
+  "due": number (optional),
+  "employee_role": string (optional),
+  "ad_platform": string (optional)
 }
 
+Allowed Categories:
+- Income: sales_courier, sales_direct, sales_online
+- Expenses: transport, salary_ops, salary_smm, salary_graphic_designer, salary_marketing, office_rent, internet_bill, utility_bill, ad_spend_facebook, ad_spend_tiktok, ad_spend_google, office_expense
+- Liabilities: vendor_due, unpaid_salary, unpaid_bill, loan
+- Owner: founder_withdrawal, founder_investment
+
 Rules:
-- "sales", "sale", "revenue", "income" => type = "income", category = "sales"
-- "rent" => type = "expense", category = "rent"
-- "salary", "wage", "payroll" => type = "expense", category = "salary"
-- "transport", "fuel", "fare" => type = "expense", category = "transport"
-- "bought laptop", "laptop", "computer", "printer", "equipment" => type = "expense", category = "equipment"
-- "borrowed", "loan" => type = "liability", category = "loan"
-- "supplier due", "unpaid supplier", "supplier payable" => type = "liability", category = "supplier_due"
-- Extract numeric amount from the message
-
-Examples:
-
-Input: sales 5000
-Output: {"amount":5000,"type":"income","category":"sales"}
-
-Input: rent 1200
-Output: {"amount":1200,"type":"expense","category":"rent"}
-
-Input: salary 5000
-Output: {"amount":5000,"type":"expense","category":"salary"}
-
-Input: bought laptop 20000
-Output: {"amount":20000,"type":"expense","category":"equipment"}
-
-Input: transport 300
-Output: {"amount":300,"type":"expense","category":"transport"}
-
-Input: borrowed 10000
-Output: {"amount":10000,"type":"liability","category":"loan"}
-
-Input: supplier due 5000
-Output: {"amount":5000,"type":"liability","category":"supplier_due"}"""
+1. Vendor due: If user mentions vendor purchase with partial payment, calculate due automatically. (e.g. "took product 300000 from Akhi Telecom paid 50000" => amount=250000, due=250000, type="liability", category="vendor_due", vendor_name="Akhi Telecom")
+2. Ad loading: If user mentions USD ad loading, convert to BDT automatically if rate is given. (e.g. "loaded 100 dollar for facebook ads at 133" => amount=13300, type="expense", category="ad_spend_facebook", ad_platform="facebook")
+3. Founder withdrawal: Do not classify as expense. Use type="owner", category="founder_withdrawal".
+4. Sales channels mapping: "courier" => sales_courier, "direct" => sales_direct, "online payment" => sales_online.
+5. If important extra fields are found, provide vendor_name, employee_role, or ad_platform in the JSON.
+"""
 
     try:
         res = requests.post(
@@ -203,52 +185,59 @@ async def webhook(request: Request):
             amount = parsed.get("amount", 0)
             type_ = parsed.get("type", "")
             category = parsed.get("category", "")
+            vendor_name = parsed.get("vendor_name")
+            due = parsed.get("due")
+            employee_role = parsed.get("employee_role")
+            ad_platform = parsed.get("ad_platform")
 
-            # Fallback logic for amount
+            # Generic fallback if AI totally fails amount extraction
             numbers_in_text = re.findall(r'\d+(?:\.\d+)?', line)
             if (not amount or amount == 0) and numbers_in_text:
                 amount = float(numbers_in_text[0])
 
-            # Fallback logic for classification
-            if not type_ or not category:
-                text_lower = line.lower()
-                if "rent" in text_lower:
-                    type_ = "expense"
-                    category = "rent"
-                elif "salary" in text_lower:
-                    type_ = "expense"
-                    category = "salary"
-                elif "transport" in text_lower:
-                    type_ = "expense"
-                    category = "transport"
-                elif "laptop" in text_lower:
-                    type_ = "expense"
-                    category = "equipment"
-                elif "borrowed" in text_lower:
-                    type_ = "liability"
-                    category = "loan"
-                elif "supplier due" in text_lower:
-                    type_ = "liability"
-                    category = "supplier_due"
-                elif "sales" in text_lower:
-                    type_ = "income"
-                    category = "sales"
+            # Build metadata payload into the note string
+            final_note = line
+            extras = []
+            if vendor_name: extras.append(f"Vendor: {vendor_name}")
+            if due is not None: extras.append(f"Due: {fmt(due)}")
+            if employee_role: extras.append(f"Role: {employee_role}")
+            if ad_platform: extras.append(f"Platform: {ad_platform}")
+            
+            if extras:
+                final_note += " | " + ", ".join(extras)
 
             if supabase:
                 supabase.table("transactions").insert({
                     "amount": amount,
                     "type": type_,
                     "category": category,
-                    "note": line,
+                    "note": final_note,
                     "source": "telegram"
                 }).execute()
 
             saved_count += 1
+            
+            reply_lines = [
+                "Saved" if len(lines) == 1 else f"{saved_count}.",
+                f"Amount: {fmt(amount)}",
+                f"Type: {type_}",
+                f"Category: {category}"
+            ]
             if len(lines) == 1:
-                send_message(chat_id, f"Saved\nAmount: {fmt(amount)}\nType: {type_}\nCategory: {category}\nNote: {line}")
+                reply_lines.append(f"Note: {line}")
+
+            if vendor_name: reply_lines.append(f"Vendor: {vendor_name}")
+            if due is not None: reply_lines.append(f"Due: {fmt(due)}")
+            if employee_role: reply_lines.append(f"Role: {employee_role}")
+            if ad_platform: reply_lines.append(f"Platform: {ad_platform}")
+
+            reply_str = "\n".join(reply_lines)
+
+            if len(lines) == 1:
+                send_message(chat_id, reply_str)
                 return {"ok": True}
             else:
-                results.append(f"{saved_count}.\nAmount: {fmt(amount)}\nType: {type_}\nCategory: {category}")
+                results.append(reply_str)
 
         except Exception as e:
             print(f"ERROR processing line '{line}':", str(e))
