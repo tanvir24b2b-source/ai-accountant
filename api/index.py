@@ -16,14 +16,19 @@ OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
-def send_message(chat_id: int, text: str):
-    if not BOT_TOKEN: return
-    resp = requests.post(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        json={"chat_id": chat_id, "text": text}
-    )
-    print("Telegram send status:", resp.status_code)
-    print("Telegram send body:", resp.text)
+def send_message(chat_id, text):
+    url = "https://api.telegram.org/bot8770543275:AAE4OOVZAf-WxAKPLeikDmdv7Jd-Bi8lWg0/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+
+    try:
+        resp = requests.post(url, json=payload)
+        print("Telegram status:", resp.status_code)
+        print("Telegram response:", resp.text)
+    except Exception as e:
+        print("Telegram ERROR:", str(e))
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -42,6 +47,10 @@ async def webhook(request: Request):
     if not chat_id or not text:
         return {"ok": True}
 
-    send_message(chat_id, f"Echo: {text}")
+    reply = f"Echo: {text}"
+
+    print("Sending to chat_id:", chat_id)
+    print("Reply text:", reply)
+    send_message(chat_id, reply)
 
     return {"ok": True}
