@@ -25,6 +25,28 @@ def send_message(chat_id, text):
     print("Telegram response:", resp.text)
 
 def ask_ai(text: str) -> str:
+    prompt = """You are an AI accountant.
+
+Extract transaction details from user input.
+
+Return ONLY valid JSON.
+Do NOT add explanation.
+Do NOT add text before or after.
+
+Format:
+{"amount": number, "type": "income|expense|liability", "category": "string"}
+
+Examples:
+
+Input: sales 5000
+Output: {"amount": 5000, "type": "income", "category": "sales"}
+
+Input: bought laptop 1200
+Output: {"amount": 1200, "type": "expense", "category": "equipment"}
+
+Now process this input:
+""" + text
+
     try:
         res = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -32,8 +54,7 @@ def ask_ai(text: str) -> str:
             json={
                 "model": "mistralai/mistral-7b-instruct",
                 "messages": [
-                    {"role": "system", "content": "You are an AI accountant. Extract amount, type (income/expense/liability), category. Return ONLY valid JSON."},
-                    {"role": "user", "content": text}
+                    {"role": "user", "content": prompt}
                 ]
             }
         )
@@ -71,26 +92,34 @@ async def webhook(request: Request):
 
     ai_response = ask_ai(text)
     print("AI response:", ai_response)
+    print("RAW AI:", ai_response)
 
     try:
-        parsed = json.loads(ai_response)
+        parsed = json.loads(ai_response.strip())
+    except:
+        reply = f"AI raw: {ai_response}"
+        send_message(chat_id, reply)
+        return {"ok": True}
+
+    try:
         amount = parsed.get("amount", 0)
         type_ = parsed.get("type", "")
         category = parsed.get("category", "")
 
-        supabase.table("transactions").insert({
-            "amount": amount,
-            "type": type_,
-            "category": category,
-            "note": text,
-            "source": "telegram"
-        }).execute()
+        if supabase:
+            supabase.table("transactions").insert({
+                "amount": amount,
+                "type": type_,
+                "category": category,
+                "note": text,
+                "source": "telegram"
+            }).execute()
 
         reply = f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}"
 
     except Exception as e:
         print("ERROR:", str(e))
-        reply = f"AI raw: {ai_response}"
+        reply = "Database saving error."
 
     send_message(chat_id, reply)
 
