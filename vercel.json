@@ -1,16 +1,12 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    }
+  "rewrites": [
+    { "source": "/webhook", "destination": "/api/index.py" },
+    { "source": "/cron", "destination": "/api/index.py" }
   ],
-  "routes": [
+  "crons": [
     {
-      "src": "/webhook",
-      "dest": "api/index.py"
+      "path": "/cron",
+      "schedule": "0 16 * * *"
     }
   ]
 }
-
