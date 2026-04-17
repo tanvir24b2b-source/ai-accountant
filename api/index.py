@@ -81,7 +81,8 @@ Examples:
 
 6. Never return broken JSON.
 
-7. If multiple lines are sent, extract multiple transactions."""
+8. If the user's setup or onboarding reply is ambiguous (e.g. combining bank and cash as one number), explicitly ask: "Please break it down: cash, bank, and bkash separately."
+9. If multiple lines are sent, extract multiple transactions."""
 
     context_str = f"\n\nPending Context: {json.dumps(pending_context)}" if pending_context else ""
     user_content = []
@@ -126,147 +127,177 @@ async def webhook(request: Request):
 
     msg = update.get("message", {})
     chat_id = msg.get("chat", {}).get("id")
-    text = msg.get("text", msg.get("caption", "")).strip()
+    text = str(msg.get("text", msg.get("caption", ""))).strip()
 
     if not chat_id: return {"ok": True}
 
-    pass
-
-    # Document check for Excel processing
-    document = msg.get("document", {})
-    if document.get("file_name", "").endswith(".xlsx"):
-        import openpyxl
-        f_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={document['file_id']}").json()
-        if f_res.get("ok"):
-            send_message(chat_id, "Processing Excel file. Standby...")
-            doc_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f_res['result']['file_path']}"
-            r = requests.get(doc_url)
-            with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-                tmp.write(r.content)
-                tmp_path = tmp.name
-            try:
-                wb = openpyxl.load_workbook(tmp_path, data_only=True)
-                ws = wb.active
-                headers = [str(c.value).strip().lower() for c in ws[1] if c.value]
-                products_saved = 0
-                for row in ws.iter_rows(min_row=2, values_only=True):
-                    if not row[0]: continue
-                    p_data = dict(zip(headers, row))
-                    name = str(p_data.get("product_name", row[0]))
-                    if supabase:
-                        supabase.table("transactions").insert({
-                            "type": "product_master",
-                            "category": name,
-                            "amount": float(p_data.get("selling_price", 0) or 0),
-                            "note": json.dumps({
-                                "sku": str(p_data.get("sku", "")),
-                                "cost_price": float(p_data.get("cost_price", 0) or 0),
-                                "selling_price": float(p_data.get("selling_price", 0) or 0),
-                                "stock_qty": int(p_data.get("stock_qty", 0) or 0),
-                                "status": str(p_data.get("status", "active"))
-                            }),
-                            "source": "telegram"
-                        }).execute()
-                        products_saved += 1
-                send_message(chat_id, f"Successfully imported {products_saved} products to memory.")
-            except Exception as e:
-                send_message(chat_id, f"Excel Import Error: {str(e)}")
-            os.remove(tmp_path)
-            return {"ok": True}
-
-    photo_url = None
-    if "photo" in msg:
-        file_id = msg["photo"][-1]["file_id"]
-        f_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}").json()
-        if f_res.get("ok"):
-            photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f_res['result']['file_path']}"
-
-    if not text and not photo_url: return {"ok": True}
-    if chat_id not in user_settings: user_settings[chat_id] = "22:00"
-
-    # Command Execution
-    if text.startswith("/"):
-        commands = [c.strip().lower() for c in re.split(r'[,\n]+', text) if c.strip()]
-        responses = []
-        try:
-            for cmd in commands:
-                if cmd == "/products":
-                    if supabase:
-                        res = supabase.table("transactions").select("category, amount, note").eq("type", "product_master").order("created_at", desc=False).execute()
-                        active_items = {}
-                        for r in res.data: active_items[r['category']] = r
-                        s = "Product Database:\n"
-                        for k, v in active_items.items(): s += f"- {k} (Selling: {fmt(v['amount'])})\n"
-                        responses.append(s)
-                elif cmd.startswith("/product"):
-                    parts = cmd.split(maxsplit=1)
-                    if len(parts) > 1 and supabase:
-                        res = supabase.table("transactions").select("*").eq("type", "product_master").eq("category", parts[1]).order("created_at", desc=True).limit(1).execute()
-                        if res.data:
-                            n = json.loads(res.data[0].get("note", "{}"))
-                            responses.append(f"Product: {res.data[0]['category']}\nSelling Price: {fmt(res.data[0]['amount'])}\nCost Price: {fmt(n.get('cost_price',0))}\nStock: {n.get('stock_qty',0)}\nSKU: {n.get('sku','')}")
-                        else: responses.append("Product not found.")
-                elif cmd == "/summary":
-                    if supabase:
-                        transactions = supabase.table("transactions").select("*").execute().data
-                        income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
-                        expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
-                        liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
-                        responses.append(f"Summary\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(income-expense)}")
-        except Exception as e:
-             responses.append(f"Command Error: {str(e)}")
-        if responses: send_message(chat_id, "\n\n".join(responses))
-        return {"ok": True}
-
-    # Remove slash commands specifically from text before assessing general safety constraint
-    base_text = text
-    if base_text.startswith("/"):
-        base_text = ""
-        
-    has_number = bool(re.search(r'\d', text))
-    is_command = text.startswith("/")
-
-    # AI Processing
-    pending = conversations.get(chat_id, {})
-    ai_res = ask_ai(text, pending, photo_url)
-    
     try:
-        parsed = json.loads(ai_res)
-    except:
-        # If response is not JSON, it is a conversational CA-style reply
-        send_message(chat_id, ai_res)
-        return {"ok": True}
-
-    if "transactions" in parsed and isinstance(parsed["transactions"], list) and len(parsed["transactions"]) > 0:
-        if not has_number and not is_command:
-            # Safety Rule: if the message has NO number and is NOT a command, ignore JSON payload logic 
-            # and gracefully pass back conversational logic if the AI generated any strings.
-            # In practical schema, if JSON hits here it violated rule 1 unexpectedly.
-            send_message(chat_id, ai_res)
-            return {"ok": True}
+        print(f"DEBUG INCOMING: Chat: {chat_id} | Text: {text}")
         
-        reply_lines = ["Saved:"]
-        for t in parsed["transactions"]:
-            amount = t.get("amount", 0)
-            t_type = t.get("type", "expense")
-            category = t.get("category", "general")
-            note = t.get("note", text)
+        # Load Memory Profile implicitly
+        pending = conversations.get(chat_id, {"history": [], "onboarding_mode": False})
+        
+        trigger_words = ["you are hired", "start", "setup", "manage my finance"]
+        if any(tw in text.lower() for tw in trigger_words):
+            if not pending.get("onboarding_mode"):
+                pending["onboarding_mode"] = True
+                print("DEBUG: Activating implicit onboarding mode")
+
+        # Document check for Excel processing
+        document = msg.get("document", {})
+        if document.get("file_name", "").endswith(".xlsx"):
+            import openpyxl
+            f_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={document['file_id']}").json()
+            if f_res.get("ok"):
+                send_message(chat_id, "Processing Excel file. Standby...")
+                doc_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f_res['result']['file_path']}"
+                r = requests.get(doc_url)
+                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                    tmp.write(r.content)
+                    tmp_path = tmp.name
+                try:
+                    wb = openpyxl.load_workbook(tmp_path, data_only=True)
+                    ws = wb.active
+                    headers = [str(c.value).strip().lower() for c in ws[1] if c.value]
+                    products_saved = 0
+                    for row in ws.iter_rows(min_row=2, values_only=True):
+                        if not row[0]: continue
+                        p_data = dict(zip(headers, row))
+                        name = str(p_data.get("product_name", row[0]))
+                        if supabase:
+                            supabase.table("transactions").insert({
+                                "type": "product_master",
+                                "category": name,
+                                "amount": float(p_data.get("selling_price", 0) or 0),
+                                "note": json.dumps({
+                                    "sku": str(p_data.get("sku", "")),
+                                    "cost_price": float(p_data.get("cost_price", 0) or 0),
+                                    "selling_price": float(p_data.get("selling_price", 0) or 0),
+                                    "stock_qty": int(p_data.get("stock_qty", 0) or 0),
+                                    "status": str(p_data.get("status", "active"))
+                                }),
+                                "source": "telegram"
+                            }).execute()
+                            products_saved += 1
+                    send_message(chat_id, f"Successfully imported {products_saved} products to memory.")
+                except Exception as e:
+                    send_message(chat_id, f"Excel Import Error: {str(e)}")
+                os.remove(tmp_path)
+                return {"ok": True}
+
+        photo_url = None
+        if "photo" in msg:
+            file_id = msg["photo"][-1]["file_id"]
+            f_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}").json()
+            if f_res.get("ok"):
+                photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f_res['result']['file_path']}"
+
+        if not text and not photo_url: return {"ok": True}
+        if chat_id not in user_settings: user_settings[chat_id] = "22:00"
+
+        # Command Execution
+        if text.startswith("/"):
+            commands = [c.strip().lower() for c in re.split(r'[,\n]+', text) if c.strip()]
+            responses = []
+            try:
+                for cmd in commands:
+                    if cmd == "/products":
+                        if supabase:
+                            res = supabase.table("transactions").select("category, amount, note").eq("type", "product_master").order("created_at", desc=False).execute()
+                            active_items = {}
+                            for r in res.data: active_items[r['category']] = r
+                            s = "Product Database:\n"
+                            for k, v in active_items.items(): s += f"- {k} (Selling: {fmt(v['amount'])})\n"
+                            responses.append(s)
+                    elif cmd.startswith("/product"):
+                        parts = cmd.split(maxsplit=1)
+                        if len(parts) > 1 and supabase:
+                            res = supabase.table("transactions").select("*").eq("type", "product_master").eq("category", parts[1]).order("created_at", desc=True).limit(1).execute()
+                            if res.data:
+                                n = json.loads(res.data[0].get("note", "{}"))
+                                responses.append(f"Product: {res.data[0]['category']}\nSelling Price: {fmt(res.data[0]['amount'])}\nCost Price: {fmt(n.get('cost_price',0))}\nStock: {n.get('stock_qty',0)}\nSKU: {n.get('sku','')}")
+                            else: responses.append("Product not found.")
+                    elif cmd == "/summary":
+                        if supabase:
+                            transactions = supabase.table("transactions").select("*").execute().data
+                            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+                            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+                            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+                            responses.append(f"Summary\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(income-expense)}")
+            except Exception as e:
+                 responses.append(f"Command Error: {str(e)}")
+            if responses: send_message(chat_id, "\n\n".join(responses))
+            return {"ok": True}
+
+        # Remove slash commands specifically from text before assessing general safety constraint
+        base_text = text
+        if base_text.startswith("/"):
+            base_text = ""
             
-            if supabase:
-                supabase.table("transactions").insert({
-                    "amount": amount,
-                    "type": t_type,
-                    "category": category,
-                    "note": note,
-                    "source": "telegram"
-                }).execute()
+        has_number = bool(re.search(r'\d', text))
+        is_command = text.startswith("/")
+
+        # AI Processing
+        ai_res = ask_ai(text, pending, photo_url)
+        print("DEBUG AI RAW:", ai_res)
+
+        # Retain history window natively 
+        pending["history"].append({"role": "user", "content": text})
+        pending["history"].append({"role": "assistant", "content": ai_res})
+        if len(pending["history"]) > 6: pending["history"] = pending["history"][-6:]
+        conversations[chat_id] = pending
+
+        try:
+            parsed = json.loads(ai_res)
+            print("DEBUG PARSED JSON:", parsed)
+        except Exception as json_err:
+            print("DEBUG JSON FAILED:", json_err)
+            # If response is not JSON, it is a conversational CA-style reply natively
+            final_reply = str(ai_res).strip()
+            if not final_reply: final_reply = "Sorry, I hit a setup issue. Please send that again."
+            send_message(chat_id, final_reply)
+            return {"ok": True}
+
+        if "transactions" in parsed and isinstance(parsed["transactions"], list) and len(parsed["transactions"]) > 0:
+            if not has_number and not is_command:
+                # Safety Rule: if the message has NO number and is NOT a command, ignore JSON payload logic 
+                print("DEBUG: Safety block activated. Passing JSON structurally as text due to zero digits.")
+                # Extrapolate conversational content cleanly 
+                final_reply = str(parsed.get("ca_reply", parsed.get("message", ai_res))).strip()
+                if not final_reply: final_reply = "Sorry, I hit a setup issue. Please send that again."
+                send_message(chat_id, final_reply)
+                return {"ok": True}
             
-            reply_lines.append(f"- {category}: {amount} ({t_type})")
-            
-        send_message(chat_id, "\n".join(reply_lines))
-        if chat_id in conversations: del conversations[chat_id]
+            reply_lines = ["Saved:"]
+            for t in parsed["transactions"]:
+                amount = t.get("amount", 0)
+                t_type = t.get("type", "expense")
+                category = t.get("category", "general")
+                note = t.get("note", text)
+                
+                if supabase:
+                    supabase.table("transactions").insert({
+                        "amount": amount,
+                        "type": t_type,
+                        "category": category,
+                        "note": note,
+                        "source": "telegram"
+                    }).execute()
+                
+                reply_lines.append(f"- {category}: {amount} ({t_type})")
+                
+            final_reply = "\n".join(reply_lines)
+            if not final_reply.strip(): final_reply = "Sorry, I hit a setup issue. Please send that again."
+            send_message(chat_id, final_reply)
+            return {"ok": True}
+
+        # If the JSON doesn't contain a transactions list (maybe valid JSON hallucination format), pass it natively.
+        final_reply = str(parsed.get("ca_reply", parsed.get("message", parsed.get("transactions", ai_res)))).strip()
+        if not final_reply or final_reply == 'None': final_reply = "Sorry, I hit a setup issue. Please send that again."
+        send_message(chat_id, final_reply)
         return {"ok": True}
 
-    # If the JSON doesn't contain a transactions list (maybe valid JSON hallucination format), pass it as text.
-    send_message(chat_id, ai_res)
-    return {"ok": True}
+    except Exception as master_err:
+        print(f"DEBUG CRITICAL APP FAILURE: {str(master_err)}")
+        send_message(chat_id, "Sorry, I hit a setup issue. Please send that again.")
+        return {"ok": True}
