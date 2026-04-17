@@ -110,24 +110,28 @@ async def webhook(request: Request):
 
     if not chat_id: return {"ok": True}
 
+    pending = conversations.get(chat_id, {})
+    is_onboarding = pending.get("onboarding_mode", False)
+
+    # Manual Restart Command Override
+    if text.startswith("/"):
+        commands = [c.strip().lower() for c in re.split(r'[,\n]+', text) if c.strip()]
+        if "/restart_onboarding" in commands:
+            conversations[chat_id] = {"onboarding_mode": True, "step": 1}
+            send_message(chat_id, "Onboarding restarted.\n\nFirst, tell me:\ncurrent cash in hand and bank balance?")
+            return {"ok": True}
+
     # Onboarding Trigger Phase (Priority 1)
     trigger_words = ["you are hired", "start", "setup", "manage my finance"]
     text_lower = text.lower()
-    if any(tw in text_lower for tw in trigger_words):
+    if not is_onboarding and any(tw in text_lower for tw in trigger_words):
         conversations[chat_id] = {"onboarding_mode": True, "step": 1}
         send_message(chat_id, "Thanks. I’ll manage finance for De Markt.\n\nFirst, tell me:\ncurrent cash in hand and bank balance?")
         return {"ok": True}
         
-    pending = conversations.get(chat_id, {})
-    if pending.get("onboarding_mode"):
+    if is_onboarding:
         step = pending.get("step", 1)
         if step == 1:
-            try:
-                ai_res = ask_ai(text, {"type":"balance"})
-                parsed = json.loads(ai_res)
-                if supabase and parsed.get("amount"):
-                    supabase.table("transactions").insert({"type": "balance", "category": parsed.get("category", "cash_balance"), "amount": parsed.get("amount"), "source": "telegram"}).execute()
-            except: pass
             conversations[chat_id]["step"] = 2
             send_message(chat_id, "Got it. Any current vendor dues or unpaid bills?")
             return {"ok": True}
@@ -137,7 +141,27 @@ async def webhook(request: Request):
             return {"ok": True}
         elif step == 3:
             conversations[chat_id]["step"] = 4
-            send_message(chat_id, "Noted. What are the regular monthly bills and ad platforms?")
+            send_message(chat_id, "What are your regular monthly bills?")
+            return {"ok": True}
+        elif step == 4:
+            conversations[chat_id]["step"] = 5
+            send_message(chat_id, "Which main vendors do you purchase from?")
+            return {"ok": True}
+        elif step == 5:
+            conversations[chat_id]["step"] = 6
+            send_message(chat_id, "Which ad platforms do you use?")
+            return {"ok": True}
+        elif step == 6:
+            conversations[chat_id]["step"] = 7
+            send_message(chat_id, "What dollar rate should I use?")
+            return {"ok": True}
+        elif step == 7:
+            conversations[chat_id]["step"] = 8
+            send_message(chat_id, "Got it. What is your preferred daily check-in time? (e.g. 10:00 PM)")
+            return {"ok": True}
+        elif step == 8:
+            conversations[chat_id]["step"] = 9
+            send_message(chat_id, "Lastly, what is your preferred language style? (e.g. English, Bangla, Mixed)")
             return {"ok": True}
         else:
             del conversations[chat_id]
