@@ -168,6 +168,31 @@ async def webhook(request: Request):
         send_message(chat_id, reply)
         return {"ok": True}
 
+    if text.strip().lower() == "/monthly":
+        if not supabase:
+            send_message(chat_id, "Database not configured.")
+            return {"ok": True}
+        
+        try:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            month_start = f"{now.year}-{now.month:02d}-01"
+            res = supabase.table("transactions").select("*").gte("created_at", month_start).execute()
+            transactions = res.data
+            
+            income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+            expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+            liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
+            profit_loss = income - expense
+            
+            reply = f"Monthly Report\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nProfit/Loss: {fmt(profit_loss)}"
+        except Exception as e:
+            print("MONTHLY ERROR:", str(e))
+            reply = "Could not generate monthly report."
+            
+        send_message(chat_id, reply)
+        return {"ok": True}
+
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     if not lines:
         return {"ok": True}
