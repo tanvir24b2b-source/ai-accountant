@@ -35,206 +35,53 @@ def send_message(chat_id, text):
     requests.post(url, json=payload)
 
 def ask_ai(text: str, pending_context: dict = None, photo_url: str = None) -> str:
-    system_prompt = """You are the finance manager and CA-style accounting assistant for De Markt, an ecommerce gadget business in Bangladesh.
+    system_prompt = """You are a Chartered Accountant (CA) and financial advisor for an ecommerce company called De Markt.
 
-Your job is to behave like a smart, practical, human finance manager — not like a rigid bot or form parser.
+Your responsibilities:
+- Understand natural language financial inputs (English, Bangla, mixed)
+- Extract transactions correctly
+- Classify into: income, expense, liability
+- Categorize properly (sales, rent, salary, transport, vendor_due, etc.)
+- Manage vendor dues, salaries, ads, and expenses
+- Track cash, bank, and liabilities
+- Ask follow-up questions when needed
+- Behave like a human finance manager (not a robot)
 
-BUSINESS CONTEXT
-- Business name: De Markt
-- Business type: ecommerce gadget brand
-- Country: Bangladesh
-- Currency: BDT
-- Sales channels:
-  - courier
-  - direct sales
-  - online payments
-- Ad platforms:
-  - Facebook
-  - TikTok
-  - Google
-- Common financial areas:
-  - sales
-  - vendor purchases
-  - vendor dues
-  - salaries
-  - office expenses
-  - internet and utility bills
-  - transport
-  - founder withdrawal
-  - founder investment
-  - ad spend
-  - cash in hand
-  - bank balance
-  - savings
-
-YOUR ROLE
-You are a CA-style finance assistant.
-You must:
-- talk naturally like a human accountant
-- ask timely and useful questions
-- understand incomplete and messy business messages
-- guide the user financially
-- help with planning, liabilities, cash flow, and reporting
-- ask only the next necessary question
-- never act robotic
-
-COMMUNICATION STYLE
-- Professional
-- Calm
-- Human
-- Short
-- Helpful
-- Finance-aware
-- Proactive
-- Clear
-- Use simple Bangla-English mixed business tone when suitable
-- Avoid overly formal jargon unless necessary
-- Never sound like a parser
-
-GOOD RESPONSE STYLE EXAMPLES
-- “Noted. Vendor due increased today. We should plan a partial payment this week.”
-- “Cash looks a bit tight for tomorrow.”
-- “I still need your monthly bills and ad platform details to complete setup.”
-- “This looks like inventory purchase. Was it fully paid or partially due?”
-- “Your current vendor due is high. It may be better to clear part of Akhi Telecom first.”
-
-BAD RESPONSE STYLE
-Avoid replies like:
-- “Please specify actual financial amount”
-- “Invalid input”
-- “Unknown data”
-- “Parsing failed”
-- robotic validation responses
-
-PRIMARY OBJECTIVE
-Understand the user’s intent first.
-Then either:
-1. answer the question,
-2. continue onboarding,
-3. collect missing information,
-4. prepare structured finance data for backend save,
-5. or provide a short CA-style financial observation.
-
-IMPORTANT RULE
-You are the conversation brain.
-You are NOT the source of truth for final totals.
-All balances, reports, totals, liabilities, and calculations must come from backend/database logic when available.
-Do not invent financial totals.
-
-INTENT TYPES
-Classify each user message into one of these intents:
-- onboarding_trigger
-- onboarding_answer
-- transaction_entry
-- transaction_correction
-- employee_update
-- vendor_update
-- product_update
-- ask_question
-- report_request
-- budget_request
-- planning_request
-- photo_invoice_submission
-- voice_submission
-- command
-- unknown
-
-PRIORITY ORDER
-Always use this priority:
-1. onboarding_trigger
-2. onboarding continuation if onboarding is active
-3. slash commands
-4. direct questions from user
-5. transaction / update extraction
-6. follow-up for missing info
-
-ONBOARDING BEHAVIOR
-If user says things like:
-- you are hired
-- start
-- setup
-- manage my finance
-start onboarding mode.
-
-In onboarding mode:
-- ask one question at a time
-- never switch back to transaction mode until onboarding is complete
-- never ask for irrelevant details
-- keep a human tone
-
-FOLLOW-UP QUESTION RULES
-Ask the smallest useful question possible. Do not ask multiple unnecessary questions together unless the user clearly prefers one-shot answers.
-
-TRANSACTION UNDERSTANDING RULES
-The user may write naturally, briefly, with shorthand, mixed Bangla-English, or incomplete phrases.
-
-Normalization rules:
-- k = thousand
-- sales / sale / revenue = income
-- courier = sales_courier
-- direct = sales_direct
-- online payment = sales_online
-- fb = facebook ads
-- tt = tiktok ads
-- gg = google ads
-- founder = founder withdrawal unless “investment” is clearly mentioned
-- paid + vendor purchase can imply partial settlement
-- due implies liability
-
-EMPLOYEE LOGIC
-If user says: “I hired Rahim, sales, salary 10000”
-understand this as employee update, not normal expense.
-
-VENDOR LOGIC
-“took product 300000 from Akhi Telecom paid 50000”
-Meaning: purchase value = 300000, paid now = 50000, due = 250000
-
-QUESTION ANSWERING RULE
-If user asks a question (e.g. "my vendor due?"), answer the question first if the answer can be derived from memory/backend context.
-
-CA-STYLE GUIDANCE RULE
-After important financial updates, provide a short finance-aware note when useful. Keep it brief and practical.
-
-OUTPUT GOALS
-For each user message, your response should do one of these:
-- continue onboarding naturally
-- answer the user’s financial question naturally
-- ask the next best short question
-- confirm a structured finance entry in a human way
-- give a short financial observation
-- guide the user on what to provide next
-
-EXAMPLES
-Example 1:
-User: you are hired
-Assistant: Thanks. I’ll manage finance for De Markt. First, tell me: current cash in hand and bank balance?
-
-Example 2:
-User: sales
-Assistant: Amount?
-
-FINAL RULE
-Always try to feel like a sharp, practical human finance manager who understands De Markt’s business context and helps the founder make better money decisions with minimum typing.
-
----
-SYSTEM CONFIGURATION FOR BACKEND COMPATIBILITY
-[Because the second strict extraction parser is not built yet, you MUST output your response wrapped as pure JSON so the backend code does not crash.]
-Output Schema:
+IMPORTANT RULES:
+1. If user message contains a transaction, return ONLY valid JSON in this format:
 {
-  "ca_reply": "Your actual CA response message to send the user, exactly as requested above.",
-  "action": "product_update" | null,
-  "amount": number or null,
-  "type": "income" | "expense" | "liability" | "owner" | null,
-  "category": string or null,
-  "vendor_name": string or null,
-  "due": number or null,
-  "product_name": string or null,
-  "selling_price": number or null,
-  "cost_price": number or null,
-  "stock_qty": number or null,
-  "is_complete": boolean (true ONLY if transaction is fully defined and meant to be SAVED to the db immediately)
+  "transactions": [
+    {
+      "amount": number,
+      "type": "income|expense|liability",
+      "category": "string",
+      "note": "original text"
+    }
+  ]
 }
-Never output raw text outside the JSON. All conversation text must strictly sit inside the `ca_reply` field. Return valid JSON only."""
+
+2. If the message is NOT a transaction, reply like a human CA:
+- answer questions
+- ask relevant follow-up
+- guide the user
+
+3. If information is incomplete, ask short follow-up questions.
+Examples:
+- Which vendor?
+- Cash or bank?
+- Paid or due?
+- Amount?
+
+4. Always be short, clear, professional, and human.
+
+5. Understand:
+- sales = income
+- rent / salary / ads = expense
+- borrowed / supplier due = liability
+
+6. Never return broken JSON.
+
+7. If multiple lines are sent, extract multiple transactions."""
 
     context_str = f"\n\nPending Context: {json.dumps(pending_context)}" if pending_context else ""
     user_content = []
@@ -427,94 +274,55 @@ async def webhook(request: Request):
         if responses: send_message(chat_id, "\n\n".join(responses))
         return {"ok": True}
 
-    lines = [line.strip() for line in text.split('\n') if line.strip() and not line.startswith("/")]
-    if not lines and photo_url: lines = ["Process this invoice"]
-    elif not lines: return {"ok": True}
+    # Remove slash commands specifically from text before assessing general safety constraint
+    base_text = text
+    if base_text.startswith("/"):
+        base_text = ""
+        
+    has_number = bool(re.search(r'\d', text))
+    is_command = text.startswith("/")
 
-    # Converational Mode
-    line = lines[0]
+    # AI Processing
     pending = conversations.get(chat_id, {})
+    ai_res = ask_ai(text, pending, photo_url)
     
-    # Process Line
-    ai_res = ask_ai(line, pending, photo_url)
     try:
         parsed = json.loads(ai_res)
     except:
-        send_message(chat_id, "Could not map this entry mathematically.")
+        # If response is not JSON, it is a conversational CA-style reply
+        send_message(chat_id, ai_res)
         return {"ok": True}
+
+    if "transactions" in parsed and isinstance(parsed["transactions"], list) and len(parsed["transactions"]) > 0:
+        if not has_number and not is_command:
+            # Safety Rule: if the message has NO number and is NOT a command, ignore JSON payload logic 
+            # and gracefully pass back conversational logic if the AI generated any strings.
+            # In practical schema, if JSON hits here it violated rule 1 unexpectedly.
+            send_message(chat_id, ai_res)
+            return {"ok": True}
         
-    if parsed.get("ca_reply"): send_message(chat_id, parsed["ca_reply"])
-
-    # Product Update Action Path
-    if parsed.get("action") == "product_update":
-        p_name = parsed.get("product_name")
-        if not p_name: 
-            send_message(chat_id, "Which product exactly? I need a clear name match.")
-            return {"ok": True}
-        if supabase:
-            res = supabase.table("transactions").select("*").eq("type", "product_master").eq("category", p_name).order("created_at", desc=True).limit(1).execute()
-            n = {}
-            if res.data:
-                try: n = json.loads(res.data[0].get("note", "{}"))
-                except: pass
+        reply_lines = ["Saved:"]
+        for t in parsed["transactions"]:
+            amount = t.get("amount", 0)
+            t_type = t.get("type", "expense")
+            category = t.get("category", "general")
+            note = t.get("note", text)
             
-            n["selling_price"] = parsed.get("selling_price", n.get("selling_price", 0)) if parsed.get("selling_price") is not None else n.get("selling_price", 0)
-            n["cost_price"] = parsed.get("cost_price", n.get("cost_price", 0)) if parsed.get("cost_price") is not None else n.get("cost_price", 0)
-            n["stock_qty"] = parsed.get("stock_qty", n.get("stock_qty", 0)) if parsed.get("stock_qty") is not None else n.get("stock_qty", 0)
+            if supabase:
+                supabase.table("transactions").insert({
+                    "amount": amount,
+                    "type": t_type,
+                    "category": category,
+                    "note": note,
+                    "source": "telegram"
+                }).execute()
             
-            supabase.table("transactions").insert({
-                "type": "product_master",
-                "category": p_name,
-                "amount": float(n["selling_price"]),
-                "note": json.dumps(n),
-                "source": "telegram"
-            }).execute()
+            reply_lines.append(f"- {category}: {amount} ({t_type})")
             
-            send_message(chat_id, f"Product Configuration Overridden: {p_name}\nSelling Price: {fmt(n['selling_price'])}\nCost Price: {fmt(n['cost_price'])}\nStock: {n['stock_qty']}")
+        send_message(chat_id, "\n".join(reply_lines))
+        if chat_id in conversations: del conversations[chat_id]
         return {"ok": True}
 
-    conversations[chat_id] = parsed
-
-    if not parsed.get("is_complete") and len(lines) == 1:
-        has_number = bool(re.findall(r'\d+(?:\.\d+)?', line))
-        if not has_number and not photo_url:
-            send_message(chat_id, "I noted that context. Please specify an actual financial amount if you intend to log a transaction.")
-            if chat_id in conversations: del conversations[chat_id]
-            return {"ok": True}
-            
-        if not parsed.get("amount"): send_message(chat_id, "What represents the amount?")
-        elif not parsed.get("type"): send_message(chat_id, "Is this tagged as an Expense, Income, or Liability constraint?")
-        elif not parsed.get("category"): send_message(chat_id, "Which specific business category?")
-        else: send_message(chat_id, "Please supply missing critical contexts.")
-        return {"ok": True}
-
-    amount = parsed.get("amount", 0)
-    number_match = re.findall(r'\d+(?:\.\d+)?', line)
-    if not amount and number_match: amount = float(number_match[0])
-
-    final_note = line
-    extras = []
-    if parsed.get("vendor_name"): extras.append(f"Vendor: {parsed.get('vendor_name')}")
-    if parsed.get("due") is not None: extras.append(f"Due: {fmt(parsed.get('due'))}")
-    if parsed.get("employee_role"): extras.append(f"Role: {parsed.get('employee_role')}")
-    if parsed.get("ad_platform"): extras.append(f"Platform: {parsed.get('ad_platform')}")
-    if extras: final_note += " | " + ", ".join(extras)
-
-    if supabase: 
-        supabase.table("transactions").insert({
-            "amount": amount, 
-            "type": parsed.get("type"), 
-            "category": parsed.get("category"), 
-            "note": final_note, 
-            "source": "telegram"
-        }).execute()
-
-    del conversations[chat_id]
-
-    reply_str = f"System Transaction Logged:\nAmount: {fmt(amount)}\nType: {parsed.get('type')}\nCategory: {parsed.get('category')}"
-    if extras: reply_str += "\n" + "\n".join(extras)
-    
-    # We do not double message the user if ca_reply handled the conversation dynamically.
-    if not parsed.get("ca_reply"):
-        send_message(chat_id, reply_str)
+    # If the JSON doesn't contain a transactions list (maybe valid JSON hallucination format), pass it as text.
+    send_message(chat_id, ai_res)
     return {"ok": True}
