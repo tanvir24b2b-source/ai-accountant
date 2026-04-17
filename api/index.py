@@ -15,8 +15,14 @@ OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
 
 # Initialize supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
 app = FastAPI()
+
+def fmt(val):
+    try:
+        f = float(val)
+        return int(f) if f.is_integer() else f
+    except:
+        return val
 
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -130,7 +136,7 @@ async def webhook(request: Request):
             liability = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "liability")
             balance = income - expense
             
-            reply = f"Summary\nIncome: {income}\nExpense: {expense}\nLiability: {liability}\nBalance: {balance}"
+            reply = f"Summary\nIncome: {fmt(income)}\nExpense: {fmt(expense)}\nLiability: {fmt(liability)}\nBalance: {fmt(balance)}"
         except Exception as e:
             print("SUMMARY ERROR:", str(e))
             reply = "Could not generate summary."
@@ -205,10 +211,10 @@ async def webhook(request: Request):
 
             saved_count += 1
             if len(lines) == 1:
-                send_message(chat_id, f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}\nNote: {line}")
+                send_message(chat_id, f"Saved\nAmount: {fmt(amount)}\nType: {type_}\nCategory: {category}\nNote: {line}")
                 return {"ok": True}
             else:
-                results.append(f"{saved_count}.\nAmount: {amount}\nType: {type_}\nCategory: {category}")
+                results.append(f"{saved_count}.\nAmount: {fmt(amount)}\nType: {type_}\nCategory: {category}")
 
         except Exception as e:
             print(f"ERROR processing line '{line}':", str(e))
