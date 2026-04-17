@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 from fastapi import FastAPI, Request
 from dotenv import load_dotenv
@@ -25,27 +26,26 @@ def send_message(chat_id, text):
     print("Telegram response:", resp.text)
 
 def ask_ai(text: str) -> str:
-    prompt = """You are an AI accountant.
-
-Extract transaction details from user input.
-
+    system_prompt = """You are an accounting data extractor.
 Return ONLY valid JSON.
-Do NOT add explanation.
-Do NOT add text before or after.
+No markdown.
+No explanation.
+No extra text.
 
-Format:
-{"amount": number, "type": "income|expense|liability", "category": "string"}
+Schema:
+{
+  "amount": number,
+  "type": "income" | "expense" | "liability",
+  "category": string
+}
 
-Examples:
-
-Input: sales 5000
-Output: {"amount": 5000, "type": "income", "category": "sales"}
-
-Input: bought laptop 1200
-Output: {"amount": 1200, "type": "expense", "category": "equipment"}
-
-Now process this input:
-""" + text
+Rules:
+- "sales", "revenue", "income received" => type = "income", category = "sales"
+- "rent", "salary", "bill", "transport", "buy", "bought", "purchase" => type = "expense"
+- "loan", "borrowed", "supplier due", "unpaid supplier" => type = "liability"
+- Extract numeric amount from the message
+- If message is "sales 5000", return:
+{"amount":5000,"type":"income","category":"sales"}"""
 
     try:
         res = requests.post(
@@ -54,7 +54,8 @@ Now process this input:
             json={
                 "model": "mistralai/mistral-7b-instruct",
                 "messages": [
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
                 ]
             }
         )
@@ -91,11 +92,11 @@ async def webhook(request: Request):
         return {"ok": True}
 
     ai_response = ask_ai(text)
-    print("AI response:", ai_response)
     print("RAW AI:", ai_response)
 
     try:
         parsed = json.loads(ai_response.strip())
+        print("PARSED:", parsed)
     except:
         reply = f"AI raw: {ai_response}"
         send_message(chat_id, reply)
@@ -105,6 +106,14 @@ async def webhook(request: Request):
         amount = parsed.get("amount", 0)
         type_ = parsed.get("type", "")
         category = parsed.get("category", "")
+
+        # Fallback logic
+        numbers_in_text = re.findall(r'\d+(?:\.\d+)?', text)
+        if (not amount or amount == 0) and numbers_in_text:
+            amount = float(numbers_in_text[0])
+            if "sales" in text.lower():
+                type_ = "income"
+                category = "sales"
 
         if supabase:
             supabase.table("transactions").insert({
