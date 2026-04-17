@@ -37,6 +37,8 @@ async def webhook(request: Request):
     if not chat_id or not text:
         return {"status": "ok"}
 
+    print("Incoming:", text)
+
     try:
         res = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -55,32 +57,28 @@ async def webhook(request: Request):
         send_reply(chat_id, "API Error")
         return {"status": "error"}
 
-    try:
-        clean_json = ai_response.strip()
-        if clean_json.startswith("```json"):
-            clean_json = clean_json[7:]
-        if clean_json.endswith("```"):
-            clean_json = clean_json[:-3]
-        clean_json = clean_json.strip()
-        
-        data = json.loads(clean_json)
-    except json.JSONDecodeError:
-        send_reply(chat_id, "JSON Parse Error")
-        return {"status": "error"}
+    print("AI response:", ai_response)
 
     try:
-        record = {
-            "amount": data.get("amount"),
-            "type": data.get("type"),
-            "category": data.get("category"),
+        parsed = json.loads(ai_response)
+        amount = parsed.get("amount", 0)
+        type_ = parsed.get("type", "")
+        category = parsed.get("category", "")
+
+        supabase.table("transactions").insert({
+            "amount": amount,
+            "type": type_,
+            "category": category,
             "note": text,
             "source": "telegram"
-        }
-        if supabase:
-            supabase.table("transactions").insert(record).execute()
-        send_reply(chat_id, f"Saved: {record['amount']} {record['type']} - {record['category']}")
-    except Exception:
-        send_reply(chat_id, "Database Error")
-        return {"status": "error"}
+        }).execute()
+
+        reply = f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}"
+
+    except Exception as e:
+        print("ERROR:", str(e))
+        reply = f"AI raw: {ai_response}"
+
+    send_reply(chat_id, reply)
 
     return {"status": "ok"}
