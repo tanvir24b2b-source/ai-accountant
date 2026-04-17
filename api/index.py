@@ -7,11 +7,10 @@ from supabase import create_client, Client
 
 load_dotenv()
 
-# Note: os.getenv takes the env var name as the first argument. I am providing your tokens as the fallback.
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8770543275:AAE4OOVZAf-WxAKPLeikDmdv7Jd-Bi8lWg0")
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://wonzungmwsqhpivagxeq.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "sb_publishable_DHHG0fzJbtAisJS4IuFtMQ_OwTKfmap")
-OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "29ef8baee3f04b6f9c602bcf98c155acd1c4d93401d5b14777fd4b2da0f2a173")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY")
 
 # Initialize supabase
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
