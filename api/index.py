@@ -40,9 +40,13 @@ Schema:
 }
 
 Rules:
-- "sales", "revenue", "income received" => type = "income", category = "sales"
-- "rent", "salary", "bill", "transport", "buy", "bought", "purchase" => type = "expense"
-- "loan", "borrowed", "supplier due", "unpaid supplier" => type = "liability"
+- "sales", "sale", "revenue", "income" => type = "income", category = "sales"
+- "rent" => type = "expense", category = "rent"
+- "salary", "wage", "payroll" => type = "expense", category = "salary"
+- "transport", "fuel", "fare" => type = "expense", category = "transport"
+- "bought laptop", "laptop", "computer", "printer", "equipment" => type = "expense", category = "equipment"
+- "borrowed", "loan" => type = "liability", category = "loan"
+- "supplier due", "unpaid supplier", "supplier payable" => type = "liability", category = "supplier_due"
 - Extract numeric amount from the message
 
 Examples:
@@ -128,11 +132,33 @@ async def webhook(request: Request):
         type_ = parsed.get("type", "")
         category = parsed.get("category", "")
 
-        # Fallback logic
+        # Fallback logic for amount
         numbers_in_text = re.findall(r'\d+(?:\.\d+)?', text)
         if (not amount or amount == 0) and numbers_in_text:
             amount = float(numbers_in_text[0])
-            if "sales" in text.lower():
+
+        # Fallback logic for classification
+        if not type_ or not category:
+            text_lower = text.lower()
+            if "rent" in text_lower:
+                type_ = "expense"
+                category = "rent"
+            elif "salary" in text_lower:
+                type_ = "expense"
+                category = "salary"
+            elif "transport" in text_lower:
+                type_ = "expense"
+                category = "transport"
+            elif "laptop" in text_lower:
+                type_ = "expense"
+                category = "equipment"
+            elif "borrowed" in text_lower:
+                type_ = "liability"
+                category = "loan"
+            elif "supplier due" in text_lower:
+                type_ = "liability"
+                category = "supplier_due"
+            elif "sales" in text_lower:
                 type_ = "income"
                 category = "sales"
 
