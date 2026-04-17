@@ -44,8 +44,29 @@ Rules:
 - "rent", "salary", "bill", "transport", "buy", "bought", "purchase" => type = "expense"
 - "loan", "borrowed", "supplier due", "unpaid supplier" => type = "liability"
 - Extract numeric amount from the message
-- If message is "sales 5000", return:
-{"amount":5000,"type":"income","category":"sales"}"""
+
+Examples:
+
+Input: sales 5000
+Output: {"amount":5000,"type":"income","category":"sales"}
+
+Input: rent 1200
+Output: {"amount":1200,"type":"expense","category":"rent"}
+
+Input: salary 5000
+Output: {"amount":5000,"type":"expense","category":"salary"}
+
+Input: bought laptop 20000
+Output: {"amount":20000,"type":"expense","category":"equipment"}
+
+Input: transport 300
+Output: {"amount":300,"type":"expense","category":"transport"}
+
+Input: borrowed 10000
+Output: {"amount":10000,"type":"liability","category":"loan"}
+
+Input: supplier due 5000
+Output: {"amount":5000,"type":"liability","category":"supplier_due"}"""
 
     try:
         res = requests.post(
@@ -124,7 +145,7 @@ async def webhook(request: Request):
                 "source": "telegram"
             }).execute()
 
-        reply = f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}"
+        reply = f"Saved\nAmount: {amount}\nType: {type_}\nCategory: {category}\nNote: {text}"
 
     except Exception as e:
         print("ERROR:", str(e))
