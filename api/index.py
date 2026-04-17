@@ -34,8 +34,11 @@ def send_message(chat_id, text):
     payload = {"chat_id": chat_id, "text": text}
     requests.post(url, json=payload)
 
-def ask_ai(text: str, pending_context: dict = None, photo_url: str = None) -> str:
-    system_prompt = """You are a Chartered Accountant (CA) and financial advisor for an ecommerce company called De Markt.
+def ask_ai(text: str, pending_context: dict = None, photo_url: str = None, strict_mode: bool = False) -> str:
+    if strict_mode:
+        system_prompt = 'Extract transactions ONLY. Return STRICT JSON. No explanation. Format: {"transactions": [{"amount": number, "type": "income|expense|liability", "category": "string", "note": "original text"}]}'
+    else:
+        system_prompt = """You are a Chartered Accountant (CA) and financial advisor for an ecommerce company called De Markt.
 
 Your responsibilities:
 - Understand natural language financial inputs (English, Bangla, mixed)
@@ -48,41 +51,13 @@ Your responsibilities:
 - Behave like a human finance manager (not a robot)
 
 IMPORTANT RULES:
-1. If user message contains a transaction, return ONLY valid JSON in this format:
-{
-  "transactions": [
-    {
-      "amount": number,
-      "type": "income|expense|liability",
-      "category": "string",
-      "note": "original text"
-    }
-  ]
-}
-
-2. If the message is NOT a transaction, reply like a human CA:
-- answer questions
-- ask relevant follow-up
-- guide the user
-
-3. If information is incomplete, ask short follow-up questions.
-Examples:
-- Which vendor?
-- Cash or bank?
-- Paid or due?
-- Amount?
-
-4. Always be short, clear, professional, and human.
-
-5. Understand:
+1. Always be short, clear, professional, and human.
+2. Understand:
 - sales = income
 - rent / salary / ads = expense
 - borrowed / supplier due = liability
-
-6. Never return broken JSON.
-
-8. If the user's setup or onboarding reply is ambiguous (e.g. combining bank and cash as one number), explicitly ask: "Please break it down: cash, bank, and bkash separately."
-9. If multiple lines are sent, extract multiple transactions."""
+3. If the user's setup or onboarding reply is ambiguous (e.g. combining bank and cash as one number), explicitly ask: "Please break it down: cash, bank, and bkash separately."
+4. If multiple lines are sent, extract multiple transactions."""
 
     context_str = f"\n\nPending Context: {json.dumps(pending_context)}" if pending_context else ""
     user_content = []
@@ -246,45 +221,49 @@ async def webhook(request: Request):
                 print("DEBUG: DB Context fetch failed", e)
 
         # AI Processing
-        print(f"DEBUG USER: {text}")
-        ai_res = ask_ai(text, pending, photo_url)
+        strict_mode = has_number and not is_command
+        print(f"DEBUG USER: {text} | STRICT: {strict_mode}")
+        ai_res = ask_ai(text, pending, photo_url, strict_mode)
         print(f"DEBUG AI RAW: {ai_res}")
 
-        if not ai_res or str(ai_res).strip() in ["{}", "[]", "None", "null"]:
-            final_reply = "Sorry, I didn’t understand. Can you rephrase?"
-            print(f"DEBUG FINAL REPLY: {final_reply}")
+        if not strict_mode:
+            # Native CA Conversation Mode
+            if not ai_res or str(ai_res).strip() in ["{}", "[]", "None", "null"]:
+                final_reply = "Sorry, I didn’t understand. Can you rephrase?"
+            else:
+                final_reply = str(ai_res).strip()
+            
+            pending["history"].append({"role": "user", "content": text})
+            pending["history"].append({"role": "assistant", "content": final_reply})
+            if len(pending["history"]) > 6: pending["history"] = pending["history"][-6:]
+            conversations[chat_id] = pending
+            
+            print(f"DEBUG FINAL CA REPLY: {final_reply}")
             send_message(chat_id, final_reply)
             return {"ok": True}
 
-        # Retain history window natively 
-        pending["history"].append({"role": "user", "content": text})
-        pending["history"].append({"role": "assistant", "content": ai_res})
-        if len(pending["history"]) > 6: pending["history"] = pending["history"][-6:]
-        conversations[chat_id] = pending
-
+        # TRANSACTION MODE 
+        parsed = {}
         try:
             parsed = json.loads(ai_res)
             print(f"DEBUG PARSED JSON: {parsed}")
         except Exception as json_err:
-            print(f"DEBUG JSON FAILED: {json_err}")
-            # If response is not JSON, it is a conversational CA-style reply natively
-            final_reply = str(ai_res).strip()
-            if not final_reply or final_reply in ["{}", "[]"]: final_reply = "Something went wrong. Please try again."
-            print(f"DEBUG FINAL REPLY: {final_reply}")
-            send_message(chat_id, final_reply)
-            return {"ok": True}
+            print(f"DEBUG JSON FAILED: {json_err}, executing RegEx Fallback")
+            num_match = re.search(r'\d+(\.\d+)?', text)
+            if num_match:
+                amount = float(num_match.group())
+                t_lower = text.lower()
+                tx_type, cat = "expense", "general"
+                if "sales" in t_lower: tx_type, cat = "income", "sales"
+                elif "rent" in t_lower: tx_type, cat = "expense", "rent"
+                elif "salary" in t_lower: tx_type, cat = "expense", "salary"
+                elif "transport" in t_lower: tx_type, cat = "expense", "transport"
+                elif "bought" in t_lower: tx_type, cat = "expense", "purchase"
+                elif "borrow" in t_lower: tx_type, cat = "liability", "borrowed"
+                elif "due" in t_lower: tx_type, cat = "liability", "due"
+                parsed = {"transactions": [{"amount": amount, "type": tx_type, "category": cat, "note": text}]}
 
         if "transactions" in parsed and isinstance(parsed["transactions"], list) and len(parsed["transactions"]) > 0:
-            if not has_number and not is_command:
-                # Safety Rule: if the message has NO number and is NOT a command, ignore JSON payload logic 
-                print("DEBUG: Safety block activated. Passing JSON structurally as text due to zero digits.")
-                # Extrapolate conversational content cleanly 
-                final_reply = str(parsed.get("ca_reply", parsed.get("message", ai_res))).strip()
-                if not final_reply or final_reply == "{}": final_reply = "Something went wrong. Please try again."
-                print(f"DEBUG FINAL REPLY: {final_reply}")
-                send_message(chat_id, final_reply)
-                return {"ok": True}
-            
             reply_lines = ["Saved:"]
             for t in parsed["transactions"]:
                 amount = t.get("amount", 0)
@@ -294,26 +273,29 @@ async def webhook(request: Request):
                 
                 if supabase:
                     supabase.table("transactions").insert({
-                        "amount": amount,
-                        "type": t_type,
-                        "category": category,
-                        "note": note,
+                        "amount": amount, "type": t_type,
+                        "category": category, "note": note,
                         "source": "telegram"
                     }).execute()
-                
                 reply_lines.append(f"- {category}: {amount} ({t_type})")
                 
-            final_reply = "\n".join(reply_lines)
-            if not final_reply.strip(): final_reply = "Something went wrong. Please try again."
-            print(f"DEBUG FINAL REPLY: {final_reply}")
+            # Structural memory update natively tracking system completion
+            pending["history"].append({"role": "user", "content": text})
+            pending["history"].append({"role": "assistant", "content": f"System executed mapping: {parsed['transactions']}"})
+            if len(pending["history"]) > 6: pending["history"] = pending["history"][-6:]
+            conversations[chat_id] = pending
+            
+            # Repoll CA Engine for natural trailing summary cleanly 
+            ca_reply = ask_ai(f"I just organically saved this array to database context: {parsed['transactions']}. Directly give a short natural CA response.", pending, photo_url, strict_mode=False)
+            if str(ca_reply).strip() in ["{}", "[]", "None", "null"]: ca_reply = ""
+            
+            final_reply = "\n".join(reply_lines) + ("\n\n" + str(ca_reply).strip() if ca_reply else "")
+            print(f"DEBUG FINAL TX REPLY: {final_reply}")
             send_message(chat_id, final_reply)
             return {"ok": True}
 
-        # If the JSON doesn't contain a transactions list (maybe valid JSON hallucination format), pass it natively.
-        final_reply = str(parsed.get("ca_reply", parsed.get("message", parsed.get("transactions", ai_res)))).strip()
-        if not final_reply or final_reply in ["None", "{}", "[]"]: final_reply = "Something went wrong. Please try again."
-        print(f"DEBUG FINAL REPLY: {final_reply}")
-        send_message(chat_id, final_reply)
+        # Safe default trailing fallback structurally overriding failures 
+        send_message(chat_id, "Sorry, I didn’t understand. Can you rephrase?")
         return {"ok": True}
 
     except Exception as master_err:
