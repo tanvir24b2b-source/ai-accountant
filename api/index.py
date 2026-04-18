@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import re
 import requests
@@ -214,12 +215,16 @@ async def webhook(request: Request):
 
         has_number = any(char.isdigit() for char in user_text)
 
+        now_ts = time.time()
         last_text = pending.get("last_text", "")
-        if user_text == last_text and has_number:
+        last_time = pending.get("last_time", 0)
+        
+        if user_text == last_text and has_number and (now_ts - last_time) < 120:
             pending["last_text"] = ""
-            send_message(chat_id, "This looks like a duplicate. Should I record it again?")
-            return {"ok": True}
+            send_message(chat_id, "Note: This looks similar to a recent entry.")
+            
         pending["last_text"] = user_text
+        pending["last_time"] = now_ts
 
         # STEP 2 — SIMPLE DETECTION (NO AI)
         keywords = ["sales", "sale", "rent", "salary", "transport", "bought", "borrowed", "due"]
