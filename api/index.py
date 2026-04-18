@@ -257,6 +257,11 @@ async def webhook(request: Request):
 
                 if is_valid:
                     if supabase:
+                        print("USER TEXT:", user_text)
+                        print("AMOUNT:", amount)
+                        print("TYPE:", tx_type)
+                        print("CATEGORY:", category)
+                        
                         payload = {
                             "business_id": "1651e4c3-0215-4f04-abd3-68c7dba3e380",
                             "amount": float(amount),
@@ -269,12 +274,13 @@ async def webhook(request: Request):
                         print("PAYLOAD:", payload)
                         try:
                             response = supabase.table("transactions").insert(payload).execute()
-                            print("RESPONSE:", response)
-                            print("SUCCESS:", response)
-                            reply_lines.append(f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}")
+                            print("SUPABASE SUCCESS:", response)
+                            reply = f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}"
+                            reply_lines.append(reply)
                         except Exception as e:
-                            print("INSERT ERROR:", str(e))
-                            reply_lines.append("Saving failed. Check logs.")
+                            print("SUPABASE INSERT ERROR:", repr(e))
+                            reply = f"Saving failed. Error logged."
+                            reply_lines.append(reply)
                 else:
                     reply_lines.append("Saving failed. Check logs.")
             
