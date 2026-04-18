@@ -276,7 +276,8 @@ async def webhook(request: Request):
                         try:
                             response = supabase.table("transactions").insert(payload).execute()
                             print("SUPABASE SUCCESS:", response)
-                            reply = f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}"
+                            amount_display = int(amount) if amount.is_integer() else amount
+                            reply = f"Saved\nAmount: {amount_display}\nType: {tx_type}\nCategory: {category}"
                             reply_lines.append(reply)
                         except Exception as e:
                             print("SUPABASE INSERT ERROR:", repr(e))
