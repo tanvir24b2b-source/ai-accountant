@@ -20,6 +20,30 @@ app = FastAPI()
 
 conversations = {}
 user_settings = {}
+DEFAULT_BUSINESS_ID = None
+
+def get_business_id():
+    global DEFAULT_BUSINESS_ID
+    if DEFAULT_BUSINESS_ID is not None:
+        return DEFAULT_BUSINESS_ID
+        
+    try:
+        if supabase:
+            b_res = supabase.table("businesses").select("id").limit(1).execute()
+            if b_res.data and len(b_res.data) > 0:
+                DEFAULT_BUSINESS_ID = b_res.data[0]["id"]
+            else:
+                ins = supabase.table("businesses").insert({
+                    "name": "De Markt",
+                    "base_currency": "BDT"
+                }).execute()
+                if ins.data and len(ins.data) > 0:
+                    DEFAULT_BUSINESS_ID = ins.data[0]["id"]
+    except Exception as e:
+        print("Error fetching/creating business:", e)
+        
+    print("BUSINESS_ID:", DEFAULT_BUSINESS_ID)
+    return DEFAULT_BUSINESS_ID
 
 def fmt(val):
     try:
@@ -141,6 +165,7 @@ async def webhook(request: Request):
                         name = str(p_data.get("product_name", row[0]))
                         if supabase:
                             supabase.table("transactions").insert({
+                                "business_id": get_business_id(),
                                 "type": "product_master",
                                 "category": name,
                                 "amount": float(p_data.get("selling_price", 0) or 0),
@@ -250,10 +275,7 @@ async def webhook(request: Request):
             if is_valid:
                 try:
                     if supabase:
-                        business_id = None
-                        b_res = supabase.table("businesses").select("id").limit(1).execute()
-                        if b_res.data and len(b_res.data) > 0:
-                            business_id = b_res.data[0]["id"]
+                        business_id = get_business_id()
                             
                         data = {
                             "business_id": business_id,
