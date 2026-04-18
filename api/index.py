@@ -316,6 +316,11 @@ async def webhook(request: Request):
                 income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
                 expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
                 balance_val = income - expense
+                
+                print("INCOME:", income)
+                print("EXPENSE:", expense)
+                print("BALANCE:", balance_val)
+                
                 balance_val = int(balance_val) if float(balance_val).is_integer() else balance_val
             
             send_message(chat_id, f"Current balance: {balance_val}")
