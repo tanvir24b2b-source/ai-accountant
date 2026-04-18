@@ -221,65 +221,67 @@ async def webhook(request: Request):
 
         # STEP 3 — TRANSACTION MODE (PRIORITY)
         if has_number:
-            num_match = re.search(r'\d+(\.\d+)?', user_text)
-            amount = float(num_match.group()) if num_match else 0.0
+            lines = [line.strip() for line in user_text.split('\n') if line.strip()]
+            reply_lines = []
             
-            t_type, category = "expense", "general"
-            if "sales" in user_text or "sale" in user_text:
-                t_type, category = "income", "sales"
-            elif "rent" in user_text:
-                t_type, category = "expense", "rent"
-            elif "salary" in user_text:
-                t_type, category = "expense", "salary"
-            elif "transport" in user_text:
-                t_type, category = "expense", "transport"
-            elif "bought" in user_text:
-                t_type, category = "expense", "equipment"
-            elif "borrowed" in user_text:
-                t_type, category = "liability", "loan"
-            elif "due" in user_text:
-                t_type, category = "liability", "supplier_due"
-            
-            t_type = t_type.lower()
-            
-            print("USER TEXT:", user_text)
-            print("HAS NUMBER:", has_number)
-            print("DETECTED AMOUNT:", amount)
-            print("DETECTED TYPE:", t_type)
-            print("DETECTED CATEGORY:", category)
-
-            is_valid = (
-                isinstance(amount, (int, float)) 
-                and t_type in ["income", "expense", "liability"] 
-                and isinstance(category, str) and len(category) > 0
-            )
-
-            if is_valid:
-                try:
-                    if supabase:
-                        business_id = get_business_id()
-                            
-                        data = {
-                            "business_id": business_id,
-                            "amount": amount, 
-                            "type": t_type,
-                            "category": category, 
-                            "note": text,
-                            "source": "telegram"
-                        }
-                        
-                        print("INSERT DATA:", data)
-                        response = supabase.table("transactions").insert(data).execute()
-                        print("SUPABASE RESPONSE:", response)
+            for line in lines:
+                if not any(char.isdigit() for char in line):
+                    continue
                     
-                    reply_text = f"Saved\nAmount: {amount}\nType: {t_type}\nCategory: {category}"
-                    send_message(chat_id, reply_text)
-                except Exception as e:
-                    print("DB ERROR:", str(e))
-                    send_message(chat_id, "I understood the transaction, but saving failed. I'm fixing it.")
-            else:
-                send_message(chat_id, "I understood the transaction, but saving failed. I'm fixing it.")
+                num_match = re.search(r'\d+(\.\d+)?', line)
+                amount = float(num_match.group()) if num_match else 0.0
+                
+                tx_type, category = "expense", "general"
+                if "sales" in line or "sale" in line:
+                    tx_type, category = "income", "sales"
+                elif "rent" in line:
+                    tx_type, category = "expense", "rent"
+                elif "salary" in line:
+                    tx_type, category = "expense", "salary"
+                elif "transport" in line:
+                    tx_type, category = "expense", "transport"
+                elif "bought" in line:
+                    tx_type, category = "expense", "equipment"
+                elif "borrowed" in line:
+                    tx_type, category = "liability", "loan"
+                elif "due" in line:
+                    tx_type, category = "liability", "supplier_due"
+                
+                tx_type = tx_type.lower()
+                
+                is_valid = (
+                    isinstance(amount, (int, float)) 
+                    and tx_type in ["income", "expense", "liability"] 
+                    and isinstance(category, str) and len(category) > 0
+                )
+
+                if is_valid:
+                    try:
+                        if supabase:
+                            business_id = "1651e4c3-0215-4f04-abd3-68c7dba3e380"
+                                
+                            payload = {
+                                "business_id": business_id,
+                                "amount": amount, 
+                                "type": tx_type,
+                                "category": category, 
+                                "note": user_text,
+                                "source": "telegram"
+                            }
+                            
+                            print("INSERT PAYLOAD:", payload)
+                            response = supabase.table("transactions").insert(payload).execute()
+                            print("SUPABASE INSERT RESPONSE:", response)
+                        
+                        reply_lines.append(f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}")
+                    except Exception as e:
+                        print("SUPABASE INSERT ERROR:", str(e))
+                        reply_lines.append("Saving failed. Check logs.")
+                else:
+                    reply_lines.append("Saving failed. Check logs.")
             
+            if reply_lines:
+                send_message(chat_id, "\n\n".join(reply_lines))
             return {"ok": True}
 
         # STEP 4 — BASIC COMMANDS
