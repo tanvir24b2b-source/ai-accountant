@@ -256,27 +256,25 @@ async def webhook(request: Request):
                 )
 
                 if is_valid:
-                    try:
-                        if supabase:
-                            business_id = "1651e4c3-0215-4f04-abd3-68c7dba3e380"
-                                
-                            payload = {
-                                "business_id": business_id,
-                                "amount": amount, 
-                                "type": tx_type,
-                                "category": category, 
-                                "note": user_text,
-                                "source": "telegram"
-                            }
-                            
-                            print("INSERT PAYLOAD:", payload)
-                            response = supabase.table("transactions").insert(payload).execute()
-                            print("SUPABASE INSERT RESPONSE:", response)
+                    if supabase:
+                        payload = {
+                            "business_id": "1651e4c3-0215-4f04-abd3-68c7dba3e380",
+                            "amount": float(amount),
+                            "type": tx_type.lower(),
+                            "category": category,
+                            "note": user_text,
+                            "source": "telegram"
+                        }
                         
-                        reply_lines.append(f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}")
-                    except Exception as e:
-                        print("SUPABASE INSERT ERROR:", str(e))
-                        reply_lines.append("Saving failed. Check logs.")
+                        print("PAYLOAD:", payload)
+                        try:
+                            response = supabase.table("transactions").insert(payload).execute()
+                            print("RESPONSE:", response)
+                            print("SUCCESS:", response)
+                            reply_lines.append(f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}")
+                        except Exception as e:
+                            print("INSERT ERROR:", str(e))
+                            reply_lines.append("Saving failed. Check logs.")
                 else:
                     reply_lines.append("Saving failed. Check logs.")
             
