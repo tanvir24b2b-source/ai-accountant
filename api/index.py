@@ -334,6 +334,33 @@ async def webhook(request: Request):
             send_message(chat_id, f"Total vendor due is {due_val}")
             return {"ok": True}
 
+        if "how" in user_text or "why" in user_text or "explain" in user_text:
+            if supabase:
+                transactions = supabase.table("transactions").select("amount, type, category").eq("business_id", "1651e4c3-0215-4f04-abd3-68c7dba3e380").execute().data
+                income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+                expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+                balance_val = income - expense
+                
+                cat_totals = {}
+                for t in transactions:
+                    if t.get("type") in ["income", "expense"]:
+                        cat = (t.get("category") or "other").capitalize()
+                        amt = float(t.get("amount") or 0)
+                        cat_totals[cat] = cat_totals.get(cat, 0) + amt
+                
+                income_disp = int(income) if float(income).is_integer() else income
+                expense_disp = int(expense) if float(expense).is_integer() else expense
+                balance_disp = int(balance_val) if float(balance_val).is_integer() else balance_val
+                
+                msg = f"Income: {income_disp}\nExpense: {expense_disp}\nBalance: {balance_disp}\n\nBreakdown:\n"
+                for c, a in cat_totals.items():
+                    a_disp = int(a) if float(a).is_integer() else a
+                    msg += f"- {c}: {a_disp}\n"
+                
+                msg += f"\nFinal Balance: {balance_disp}"
+                send_message(chat_id, msg)
+            return {"ok": True}
+
         # STEP 6 — FALLBACK (LAST ONLY)
         send_message(chat_id, "I didn’t understand. Try like: sales 5000 or rent 1200")
         return {"ok": True}
