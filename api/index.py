@@ -167,7 +167,6 @@ async def webhook(request: Request):
             if f_res.get("ok"):
                 photo_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{f_res['result']['file_path']}"
 
-        if not text and not photo_url: return {"ok": True}
         if chat_id not in user_settings: user_settings[chat_id] = "22:00"
 
         # Command Execution
@@ -204,98 +203,77 @@ async def webhook(request: Request):
             if responses: send_message(chat_id, "\n\n".join(responses))
             return {"ok": True}
 
-        # Remove slash commands specifically from text before assessing general safety constraint
-        base_text = text
-        if base_text.startswith("/"):
-            base_text = ""
-            
-        has_number = bool(re.search(r'\d', text))
-        is_command = text.startswith("/")
-
-        # Extract dynamic DB Context for conversational AI routing
-        if supabase:
-            try:
-                txs = supabase.table("transactions").select("amount, type, category, note").order("created_at", desc=True).limit(30).execute().data
-                pending["recent_database_memory"] = txs
-            except Exception as e:
-                print("DEBUG: DB Context fetch failed", e)
-
-        # AI Processing
-        strict_mode = has_number and not is_command
-        print(f"DEBUG USER: {text} | STRICT: {strict_mode}")
-        ai_res = ask_ai(text, pending, photo_url, strict_mode)
-        print(f"DEBUG AI RAW: {ai_res}")
-
-        if not strict_mode:
-            # Native CA Conversation Mode
-            if not ai_res or str(ai_res).strip() in ["{}", "[]", "None", "null"]:
-                final_reply = "Sorry, I didn’t understand. Can you rephrase?"
-            else:
-                final_reply = str(ai_res).strip()
-            
-            pending["history"].append({"role": "user", "content": text})
-            pending["history"].append({"role": "assistant", "content": final_reply})
-            if len(pending["history"]) > 6: pending["history"] = pending["history"][-6:]
-            conversations[chat_id] = pending
-            
-            print(f"DEBUG FINAL CA REPLY: {final_reply}")
-            send_message(chat_id, final_reply)
+        # STEP 1 — RECEIVE MESSAGE
+        user_text = text.lower().strip()
+        if not user_text:
+            send_message(chat_id, "Please send something.")
             return {"ok": True}
 
-        # TRANSACTION MODE 
-        parsed = {}
-        try:
-            parsed = json.loads(ai_res)
-            print(f"DEBUG PARSED JSON: {parsed}")
-        except Exception as json_err:
-            print(f"DEBUG JSON FAILED: {json_err}, executing RegEx Fallback")
-            num_match = re.search(r'\d+(\.\d+)?', text)
-            if num_match:
-                amount = float(num_match.group())
-                t_lower = text.lower()
-                tx_type, cat = "expense", "general"
-                if "sales" in t_lower: tx_type, cat = "income", "sales"
-                elif "rent" in t_lower: tx_type, cat = "expense", "rent"
-                elif "salary" in t_lower: tx_type, cat = "expense", "salary"
-                elif "transport" in t_lower: tx_type, cat = "expense", "transport"
-                elif "bought" in t_lower: tx_type, cat = "expense", "purchase"
-                elif "borrow" in t_lower: tx_type, cat = "liability", "borrowed"
-                elif "due" in t_lower: tx_type, cat = "liability", "due"
-                parsed = {"transactions": [{"amount": amount, "type": tx_type, "category": cat, "note": text}]}
+        # STEP 2 — SIMPLE DETECTION (NO AI)
+        has_number = any(char.isdigit() for char in user_text)
 
-        if "transactions" in parsed and isinstance(parsed["transactions"], list) and len(parsed["transactions"]) > 0:
-            reply_lines = ["Saved:"]
-            for t in parsed["transactions"]:
-                amount = t.get("amount", 0)
-                t_type = t.get("type", "expense")
-                category = t.get("category", "general")
-                note = t.get("note", text)
-                
-                if supabase:
-                    supabase.table("transactions").insert({
-                        "amount": amount, "type": t_type,
-                        "category": category, "note": note,
-                        "source": "telegram"
-                    }).execute()
-                reply_lines.append(f"- {category}: {amount} ({t_type})")
-                
-            # Structural memory update natively tracking system completion
-            pending["history"].append({"role": "user", "content": text})
-            pending["history"].append({"role": "assistant", "content": f"System executed mapping: {parsed['transactions']}"})
-            if len(pending["history"]) > 6: pending["history"] = pending["history"][-6:]
-            conversations[chat_id] = pending
+        # STEP 3 — TRANSACTION MODE (PRIORITY)
+        if has_number:
+            num_match = re.search(r'\d+(\.\d+)?', user_text)
+            amount = float(num_match.group()) if num_match else 0.0
             
-            # Repoll CA Engine for natural trailing summary cleanly 
-            ca_reply = ask_ai(f"I just organically saved this array to database context: {parsed['transactions']}. Directly give a short natural CA response.", pending, photo_url, strict_mode=False)
-            if str(ca_reply).strip() in ["{}", "[]", "None", "null"]: ca_reply = ""
+            t_type, category = "expense", "general"
+            if "sale" in user_text:
+                t_type, category = "income", "sales"
+            elif "rent" in user_text:
+                t_type, category = "expense", "rent"
+            elif "salary" in user_text:
+                t_type, category = "expense", "salary"
+            elif "transport" in user_text:
+                t_type, category = "expense", "transport"
+            elif "bought" in user_text:
+                t_type, category = "expense", "equipment"
+            elif "borrowed" in user_text:
+                t_type, category = "liability", "loan"
+            elif "due" in user_text:
+                t_type, category = "liability", "supplier_due"
             
-            final_reply = "\n".join(reply_lines) + ("\n\n" + str(ca_reply).strip() if ca_reply else "")
-            print(f"DEBUG FINAL TX REPLY: {final_reply}")
-            send_message(chat_id, final_reply)
+            if supabase:
+                supabase.table("transactions").insert({
+                    "amount": amount, "type": t_type,
+                    "category": category, "note": text,
+                    "source": "telegram"
+                }).execute()
+            
+            reply_text = f"Saved\nAmount: {amount}\nType: {t_type}\nCategory: {category}"
+            send_message(chat_id, reply_text)
             return {"ok": True}
 
-        # Safe default trailing fallback structurally overriding failures 
-        send_message(chat_id, "Sorry, I didn’t understand. Can you rephrase?")
+        # STEP 4 — BASIC COMMANDS
+        if user_text in ["hi", "hello"]:
+            send_message(chat_id, "I'm managing your finances. Tell me a transaction or ask a question.")
+            return {"ok": True}
+            
+        if "hired" in user_text:
+            send_message(chat_id, "Got it. I'll act as your CA. Let's start with your current cash/bank balance.")
+            return {"ok": True}
+
+        # STEP 5 — SIMPLE QUESTIONS (NO AI YET)
+        if "cash" in user_text or "balance" in user_text:
+            balance_val = 0
+            if supabase:
+                transactions = supabase.table("transactions").select("amount, type").execute().data
+                income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
+                expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
+                balance_val = income - expense
+            send_message(chat_id, f"Current balance is {balance_val}")
+            return {"ok": True}
+
+        if "vendor" in user_text and "due" in user_text:
+            due_val = 0
+            if supabase:
+                txs = supabase.table("transactions").select("amount, type, category").execute().data
+                due_val = sum(float(t.get("amount") or 0) for t in txs if t.get("type") == "liability" and t.get("category") in ["supplier_due", "due"])
+            send_message(chat_id, f"Total vendor due is {due_val}")
+            return {"ok": True}
+
+        # STEP 6 — FALLBACK (LAST ONLY)
+        send_message(chat_id, "I didn’t understand. Try like: sales 5000 or rent 1200")
         return {"ok": True}
 
     except Exception as master_err:
