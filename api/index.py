@@ -271,10 +271,11 @@ async def webhook(request: Request):
                             "source": "telegram"
                         }
                         
+                        print("SUPABASE_URL:", SUPABASE_URL)
                         print("PAYLOAD:", payload)
                         try:
                             response = supabase.table("transactions").insert(payload).execute()
-                            print("SUPABASE SUCCESS:", response)
+                            print("SUPABASE RESPONSE:", response)
                             reply = f"Saved\nAmount: {amount}\nType: {tx_type}\nCategory: {category}"
                             reply_lines.append(reply)
                         except Exception as e:
