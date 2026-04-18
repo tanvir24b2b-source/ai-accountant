@@ -218,9 +218,11 @@ async def webhook(request: Request):
 
         # STEP 2 — SIMPLE DETECTION (NO AI)
         has_number = any(char.isdigit() for char in user_text)
+        keywords = ["sales", "sale", "rent", "salary", "transport", "bought", "borrowed", "due"]
+        has_keyword = any(kw in user_text for kw in keywords)
 
         # STEP 3 — TRANSACTION MODE (PRIORITY)
-        if has_number:
+        if has_number and has_keyword:
             lines = [line.strip() for line in user_text.split('\n') if line.strip()]
             success_lines = []
             error_lines = []
@@ -228,25 +230,32 @@ async def webhook(request: Request):
             for line in lines:
                 if not any(char.isdigit() for char in line):
                     continue
+                
+                line_lower = line.lower()
+                if not any(kw in line_lower for kw in keywords):
+                    continue
                     
                 num_match = re.search(r'\d+(\.\d+)?', line)
                 amount = float(num_match.group()) if num_match else 0.0
                 
-                tx_type, category = "expense", "general"
-                if "sales" in line or "sale" in line:
+                tx_type, category = None, None
+                if "sales" in line_lower or "sale" in line_lower:
                     tx_type, category = "income", "sales"
-                elif "rent" in line:
+                elif "rent" in line_lower:
                     tx_type, category = "expense", "rent"
-                elif "salary" in line:
+                elif "salary" in line_lower:
                     tx_type, category = "expense", "salary"
-                elif "transport" in line:
+                elif "transport" in line_lower:
                     tx_type, category = "expense", "transport"
-                elif "bought" in line:
+                elif "bought" in line_lower:
                     tx_type, category = "expense", "equipment"
-                elif "borrowed" in line:
+                elif "borrowed" in line_lower:
                     tx_type, category = "liability", "loan"
-                elif "due" in line:
+                elif "due" in line_lower:
                     tx_type, category = "liability", "supplier_due"
+                
+                if not tx_type:
+                    continue
                 
                 tx_type = tx_type.lower()
                 
@@ -297,7 +306,7 @@ async def webhook(request: Request):
             
             if final_replies:
                 send_message(chat_id, "\n\n".join(final_replies))
-            return {"ok": True}
+                return {"ok": True}
 
         # STEP 4 — BASIC COMMANDS
         if user_text in ["hi", "hello"]:
