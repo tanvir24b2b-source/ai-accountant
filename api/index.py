@@ -280,7 +280,8 @@ async def webhook(request: Request):
                             reply_lines.append(reply)
                         except Exception as e:
                             print("SUPABASE INSERT ERROR:", repr(e))
-                            raise
+                            reply = f"DB error: {str(e)}"
+                            reply_lines.append(reply)
                 else:
                     reply_lines.append("Saving failed. Check logs.")
             
