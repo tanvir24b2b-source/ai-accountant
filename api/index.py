@@ -233,6 +233,8 @@ async def webhook(request: Request):
             elif "due" in user_text:
                 t_type, category = "liability", "supplier_due"
             
+            t_type = t_type.lower()
+            
             print("USER TEXT:", user_text)
             print("HAS NUMBER:", has_number)
             print("DETECTED AMOUNT:", amount)
@@ -248,16 +250,28 @@ async def webhook(request: Request):
             if is_valid:
                 try:
                     if supabase:
-                        supabase.table("transactions").insert({
-                            "amount": amount, "type": t_type,
-                            "category": category, "note": text,
+                        business_id = None
+                        b_res = supabase.table("businesses").select("id").limit(1).execute()
+                        if b_res.data and len(b_res.data) > 0:
+                            business_id = b_res.data[0]["id"]
+                            
+                        data = {
+                            "business_id": business_id,
+                            "amount": amount, 
+                            "type": t_type,
+                            "category": category, 
+                            "note": text,
                             "source": "telegram"
-                        }).execute()
+                        }
+                        
+                        print("INSERT DATA:", data)
+                        response = supabase.table("transactions").insert(data).execute()
+                        print("SUPABASE RESPONSE:", response)
                     
                     reply_text = f"Saved\nAmount: {amount}\nType: {t_type}\nCategory: {category}"
                     send_message(chat_id, reply_text)
                 except Exception as e:
-                    print("TRANSACTION SAVE ERROR:", str(e))
+                    print("DB ERROR:", str(e))
                     send_message(chat_id, "I understood the transaction, but saving failed. I'm fixing it.")
             else:
                 send_message(chat_id, "I understood the transaction, but saving failed. I'm fixing it.")
