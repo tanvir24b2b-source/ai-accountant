@@ -312,11 +312,13 @@ async def webhook(request: Request):
         if "cash" in user_text or "balance" in user_text:
             balance_val = 0
             if supabase:
-                transactions = supabase.table("transactions").select("amount, type").execute().data
+                transactions = supabase.table("transactions").select("amount, type").eq("business_id", "1651e4c3-0215-4f04-abd3-68c7dba3e380").execute().data
                 income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
                 expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
                 balance_val = income - expense
-            send_message(chat_id, f"Current balance is {balance_val}")
+                balance_val = int(balance_val) if float(balance_val).is_integer() else balance_val
+            
+            send_message(chat_id, f"Current balance: {balance_val}")
             return {"ok": True}
 
         if "vendor" in user_text and "due" in user_text:
