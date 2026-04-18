@@ -98,7 +98,7 @@ async def run_cron():
     if ADMIN_CHAT_ID and int(ADMIN_CHAT_ID) not in targets:
         targets.append(int(ADMIN_CHAT_ID))
     for cid in targets:
-        send_message(cid, "De Markt day-end update\n\nReply shortly:\n- total sales?\n- any vendor purchase/payment?\n- total expenses?\n- any salary paid?\n- ad spend today?\n- founder withdrawal/investment?\n- any bills paid?")
+        send_message(cid, "Any sales or expenses to record today?")
     return {"ok": True}
 
 @app.post("/webhook")
@@ -116,7 +116,7 @@ async def webhook(request: Request):
         print(f"DEBUG INCOMING: Chat: {chat_id} | Text: {text}")
         
         # Load Memory Profile implicitly
-        pending = conversations.get(chat_id, {"history": [], "onboarding_mode": False})
+        pending = conversations.setdefault(chat_id, {"history": [], "onboarding_mode": False})
         
         trigger_words = ["you are hired", "start", "setup", "manage my finance"]
 
@@ -212,8 +212,16 @@ async def webhook(request: Request):
             send_message(chat_id, "Please send something.")
             return {"ok": True}
 
-        # STEP 2 — SIMPLE DETECTION (NO AI)
         has_number = any(char.isdigit() for char in user_text)
+
+        last_text = pending.get("last_text", "")
+        if user_text == last_text and has_number:
+            pending["last_text"] = ""
+            send_message(chat_id, "This looks like a duplicate. Should I record it again?")
+            return {"ok": True}
+        pending["last_text"] = user_text
+
+        # STEP 2 — SIMPLE DETECTION (NO AI)
         keywords = ["sales", "sale", "rent", "salary", "transport", "bought", "borrowed", "due"]
         has_keyword = any(kw in user_text for kw in keywords)
 
@@ -305,9 +313,11 @@ async def webhook(request: Request):
                     if follow: msg += f"\n{follow}"
                     final_replies.append(msg)
                 else:
-                    msg = "Done."
+                    msg = "Recorded:"
                     for cat, amt, typ in success_lines:
-                        msg += f"\n- {cat.capitalize()} {amt}"
+                        sign = "+" if typ == "income" else "-"
+                        if typ == "liability": sign = ""
+                        msg += f"\n{sign}{amt} {cat}"
                     final_replies.append(msg)
             
             if error_lines:
@@ -332,20 +342,26 @@ async def webhook(request: Request):
 
         # STEP 5 — SIMPLE QUESTIONS (NO AI YET)
         if "cash" in user_text or "balance" in user_text:
-            balance_val = 0
             if supabase:
                 transactions = supabase.table("transactions").select("amount, type").eq("business_id", "1651e4c3-0215-4f04-abd3-68c7dba3e380").execute().data
                 income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
                 expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
                 balance_val = income - expense
                 
-                print("INCOME:", income)
-                print("EXPENSE:", expense)
-                print("BALANCE:", balance_val)
-                
                 balance_val = int(balance_val) if float(balance_val).is_integer() else balance_val
-            
-            send_message(chat_id, f"You have {balance_val} in cash.")
+                income_disp = int(income) if float(income).is_integer() else income
+                expense_disp = int(expense) if float(expense).is_integer() else expense
+                
+                insight = ""
+                if income > 0 and expense > (0.7 * income):
+                    insight = "\n\nYour expenses are quite high compared to income."
+                elif balance_val < 5000:
+                    insight = "\n\nCash is getting low. Be careful with spending."
+                elif income > expense:
+                    insight = "\n\nGood. You're running at a profit."
+                
+                msg = f"You have {balance_val} in cash.\n\nYou earned: {income_disp}\nYou spent: {expense_disp}{insight}"
+                send_message(chat_id, msg)
             return {"ok": True}
 
         if "vendor" in user_text and "due" in user_text:
@@ -356,26 +372,8 @@ async def webhook(request: Request):
             send_message(chat_id, f"Total vendor due is {due_val}")
             return {"ok": True}
 
-        if "how" in user_text or "why" in user_text or "explain" in user_text:
-            if supabase:
-                transactions = supabase.table("transactions").select("amount, type, category").eq("business_id", "1651e4c3-0215-4f04-abd3-68c7dba3e380").execute().data
-                income = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "income")
-                expense = sum(float(t.get("amount") or 0) for t in transactions if t.get("type") == "expense")
-                balance_val = income - expense
-                
-                cat_totals = {}
-                for t in transactions:
-                    if t.get("type") in ["income", "expense"]:
-                        cat = (t.get("category") or "other").capitalize()
-                        amt = float(t.get("amount") or 0)
-                        cat_totals[cat] = cat_totals.get(cat, 0) + amt
-                
-                income_disp = int(income) if float(income).is_integer() else income
-                expense_disp = int(expense) if float(expense).is_integer() else expense
-                balance_disp = int(balance_val) if float(balance_val).is_integer() else balance_val
-                
-                msg = f"Income: {income_disp}\nExpense: {expense_disp}\nBalance: {balance_disp}"
-                send_message(chat_id, msg)
+        if "how" in user_text or "why" in user_text or "breakdown" in user_text:
+            send_message(chat_id, "Your income is from sales.\nExpenses include rent and other costs.")
             return {"ok": True}
 
         # STEP 6 — FALLBACK (LAST ONLY)
