@@ -119,10 +119,6 @@ async def webhook(request: Request):
         pending = conversations.get(chat_id, {"history": [], "onboarding_mode": False})
         
         trigger_words = ["you are hired", "start", "setup", "manage my finance"]
-        if any(tw in text.lower() for tw in trigger_words):
-            if not pending.get("onboarding_mode"):
-                pending["onboarding_mode"] = True
-                print("DEBUG: Activating implicit onboarding mode")
 
         # Document check for Excel processing
         document = msg.get("document", {})
@@ -222,6 +218,10 @@ async def webhook(request: Request):
         has_keyword = any(kw in user_text for kw in keywords)
 
         # STEP 3 — TRANSACTION MODE (PRIORITY)
+        if has_number and not has_keyword:
+            send_message(chat_id, "Is this a sale or an expense?")
+            return {"ok": True}
+            
         if has_number and has_keyword:
             lines = [line.strip() for line in user_text.split('\n') if line.strip()]
             success_lines = []
@@ -287,7 +287,7 @@ async def webhook(request: Request):
                             response = supabase.table("transactions").insert(payload).execute()
                             print("SUPABASE SUCCESS:", response)
                             amount_display = int(amount) if amount.is_integer() else amount
-                            success_lines.append(f"{category} {amount_display}")
+                            success_lines.append((category, amount_display, tx_type))
                         except Exception as e:
                             print("SUPABASE INSERT ERROR:", repr(e))
                             error_lines.append(f"DB error: {str(e)}")
@@ -296,10 +296,19 @@ async def webhook(request: Request):
             
             final_replies = []
             if success_lines:
-                msg = f"Saved {len(success_lines)} transaction{'s' if len(success_lines) > 1 else ''}:"
-                for i, s in enumerate(success_lines, 1):
-                    msg += f"\n{i}. {s}"
-                final_replies.append(msg)
+                if len(success_lines) == 1:
+                    cat, amt, typ = success_lines[0]
+                    word = "added" if typ == "income" else "recorded"
+                    follow = "Good. Cash increased." if typ == "income" else "Cash is now updated."
+                    if typ == "liability": follow = ""
+                    msg = f"Noted. {cat.capitalize()} {amt} {word}."
+                    if follow: msg += f"\n{follow}"
+                    final_replies.append(msg)
+                else:
+                    msg = "Done."
+                    for cat, amt, typ in success_lines:
+                        msg += f"\n- {cat.capitalize()} {amt}"
+                    final_replies.append(msg)
             
             if error_lines:
                 final_replies.extend(error_lines)
@@ -313,8 +322,12 @@ async def webhook(request: Request):
             send_message(chat_id, "I'm managing your finances. Tell me a transaction or ask a question.")
             return {"ok": True}
             
-        if "hired" in user_text:
-            send_message(chat_id, "Got it. I'll act as your CA. Let's start with your current cash/bank balance.")
+        if any(tw in user_text for tw in trigger_words):
+            if pending.get("onboarding_mode"):
+                send_message(chat_id, "I'm already managing your finances.")
+            else:
+                pending["onboarding_mode"] = True
+                send_message(chat_id, "Got it. I'll act as your CA. Let's start with your current cash/bank balance.")
             return {"ok": True}
 
         # STEP 5 — SIMPLE QUESTIONS (NO AI YET)
@@ -332,7 +345,7 @@ async def webhook(request: Request):
                 
                 balance_val = int(balance_val) if float(balance_val).is_integer() else balance_val
             
-            send_message(chat_id, f"Current balance: {balance_val}")
+            send_message(chat_id, f"You have {balance_val} in cash.")
             return {"ok": True}
 
         if "vendor" in user_text and "due" in user_text:
@@ -361,12 +374,7 @@ async def webhook(request: Request):
                 expense_disp = int(expense) if float(expense).is_integer() else expense
                 balance_disp = int(balance_val) if float(balance_val).is_integer() else balance_val
                 
-                msg = f"Income: {income_disp}\nExpense: {expense_disp}\nBalance: {balance_disp}\n\nBreakdown:\n"
-                for c, a in cat_totals.items():
-                    a_disp = int(a) if float(a).is_integer() else a
-                    msg += f"- {c}: {a_disp}\n"
-                
-                msg += f"\nFinal Balance: {balance_disp}"
+                msg = f"Income: {income_disp}\nExpense: {expense_disp}\nBalance: {balance_disp}"
                 send_message(chat_id, msg)
             return {"ok": True}
 
