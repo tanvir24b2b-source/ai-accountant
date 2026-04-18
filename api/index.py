@@ -20,30 +20,12 @@ app = FastAPI()
 
 conversations = {}
 user_settings = {}
-DEFAULT_BUSINESS_ID = None
+DEFAULT_BUSINESS_ID = "1651e4c3-0215-4f04-abd3-68c7dba3e380"
 
-def get_business_id():
-    global DEFAULT_BUSINESS_ID
-    if DEFAULT_BUSINESS_ID is not None:
-        return DEFAULT_BUSINESS_ID
-        
-    try:
-        if supabase:
-            b_res = supabase.table("businesses").select("id").limit(1).execute()
-            if b_res.data and len(b_res.data) > 0:
-                DEFAULT_BUSINESS_ID = b_res.data[0]["id"]
-            else:
-                ins = supabase.table("businesses").insert({
-                    "name": "De Markt",
-                    "base_currency": "BDT"
-                }).execute()
-                if ins.data and len(ins.data) > 0:
-                    DEFAULT_BUSINESS_ID = ins.data[0]["id"]
-    except Exception as e:
-        print("Error fetching/creating business:", e)
-        
-    print("BUSINESS_ID:", DEFAULT_BUSINESS_ID)
-    return DEFAULT_BUSINESS_ID
+def get_business_id(context_business_id=None):
+    business_id = context_business_id if context_business_id else DEFAULT_BUSINESS_ID
+    print("Using business_id:", business_id)
+    return business_id
 
 def fmt(val):
     try:
