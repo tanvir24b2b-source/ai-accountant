@@ -218,7 +218,7 @@ async def webhook(request: Request):
             amount = float(num_match.group()) if num_match else 0.0
             
             t_type, category = "expense", "general"
-            if "sale" in user_text:
+            if "sales" in user_text or "sale" in user_text:
                 t_type, category = "income", "sales"
             elif "rent" in user_text:
                 t_type, category = "expense", "rent"
@@ -233,15 +233,35 @@ async def webhook(request: Request):
             elif "due" in user_text:
                 t_type, category = "liability", "supplier_due"
             
-            if supabase:
-                supabase.table("transactions").insert({
-                    "amount": amount, "type": t_type,
-                    "category": category, "note": text,
-                    "source": "telegram"
-                }).execute()
+            print("USER TEXT:", user_text)
+            print("HAS NUMBER:", has_number)
+            print("DETECTED AMOUNT:", amount)
+            print("DETECTED TYPE:", t_type)
+            print("DETECTED CATEGORY:", category)
+
+            is_valid = (
+                isinstance(amount, (int, float)) 
+                and t_type in ["income", "expense", "liability"] 
+                and isinstance(category, str) and len(category) > 0
+            )
+
+            if is_valid:
+                try:
+                    if supabase:
+                        supabase.table("transactions").insert({
+                            "amount": amount, "type": t_type,
+                            "category": category, "note": text,
+                            "source": "telegram"
+                        }).execute()
+                    
+                    reply_text = f"Saved\nAmount: {amount}\nType: {t_type}\nCategory: {category}"
+                    send_message(chat_id, reply_text)
+                except Exception as e:
+                    print("TRANSACTION SAVE ERROR:", str(e))
+                    send_message(chat_id, "I understood the transaction, but saving failed. I'm fixing it.")
+            else:
+                send_message(chat_id, "I understood the transaction, but saving failed. I'm fixing it.")
             
-            reply_text = f"Saved\nAmount: {amount}\nType: {t_type}\nCategory: {category}"
-            send_message(chat_id, reply_text)
             return {"ok": True}
 
         # STEP 4 — BASIC COMMANDS
