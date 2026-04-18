@@ -222,7 +222,8 @@ async def webhook(request: Request):
         # STEP 3 — TRANSACTION MODE (PRIORITY)
         if has_number:
             lines = [line.strip() for line in user_text.split('\n') if line.strip()]
-            reply_lines = []
+            success_lines = []
+            error_lines = []
             
             for line in lines:
                 if not any(char.isdigit() for char in line):
@@ -277,17 +278,25 @@ async def webhook(request: Request):
                             response = supabase.table("transactions").insert(payload).execute()
                             print("SUPABASE SUCCESS:", response)
                             amount_display = int(amount) if amount.is_integer() else amount
-                            reply = f"Saved\nAmount: {amount_display}\nType: {tx_type}\nCategory: {category}"
-                            reply_lines.append(reply)
+                            success_lines.append(f"{category} {amount_display}")
                         except Exception as e:
                             print("SUPABASE INSERT ERROR:", repr(e))
-                            reply = f"DB error: {str(e)}"
-                            reply_lines.append(reply)
+                            error_lines.append(f"DB error: {str(e)}")
                 else:
-                    reply_lines.append("Saving failed. Check logs.")
+                    error_lines.append("Saving failed. Check logs.")
             
-            if reply_lines:
-                send_message(chat_id, "\n\n".join(reply_lines))
+            final_replies = []
+            if success_lines:
+                msg = f"Saved {len(success_lines)} transaction{'s' if len(success_lines) > 1 else ''}:"
+                for i, s in enumerate(success_lines, 1):
+                    msg += f"\n{i}. {s}"
+                final_replies.append(msg)
+            
+            if error_lines:
+                final_replies.extend(error_lines)
+            
+            if final_replies:
+                send_message(chat_id, "\n\n".join(final_replies))
             return {"ok": True}
 
         # STEP 4 — BASIC COMMANDS
